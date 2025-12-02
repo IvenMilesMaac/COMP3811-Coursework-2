@@ -12,16 +12,16 @@ static const Mat44f A = { {
     3.f, 1.f, 4.f, 5.f,
     2.f, 1.f, 0.f, 1.f
 } };
-static const Mat44f B = { {
-    1.f, 2.f, 0.f, 1.f,
-    3.f, 0.f, 2.f, 1.f,
-    4.f, 1.f, 3.f, 0.f,
-    2.f, 5.f, 1.f, 4.f
-} };
-static const Vec4f V = { 1.f, 3.f, 7.f, 4.f };
 
 TEST_CASE("Matrix multiplication", "[Mat44f][operator]")
 {
+    Mat44f B = { {
+        1.f, 2.f, 0.f, 1.f,
+        3.f, 0.f, 2.f, 1.f,
+        4.f, 1.f, 3.f, 0.f,
+        2.f, 5.f, 1.f, 4.f
+    } };
+
     SECTION("Multiplying with identity matrix") {
         Mat44f I = kIdentity44f;
         REQUIRE(isEqual((A * I), A));
@@ -46,6 +46,7 @@ TEST_CASE("Matrix multiplication", "[Mat44f][operator]")
 
 TEST_CASE("Matrix-vector multiplication", "[Mat44f][Vec4f][operator]")
 {
+    Vec4f V = { 1.f, 3.f, 7.f, 4.f };
     SECTION("Multiplying with identity matrix") {
         Mat44f I = kIdentity44f;
         // implemented function in Mat44f doesn't account for other direction
