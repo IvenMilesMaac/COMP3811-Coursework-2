@@ -50,4 +50,8 @@ Thumbs.db
 !premake5.exe
 !premake5.apple
 !premake5.lua
-!third_party/**
+!third_party/**/*.h
+!third_party/**/*.hpp
+!third_party/**/*.c
+!third_party/**/*.cpp
+!third_party/**/premake5.lua
