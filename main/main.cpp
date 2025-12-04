@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 
+// Imports
 #include <vector> 
 #include <rapidobj/rapidobj.hpp> 
 #include "../vmlib/vec2.hpp"
@@ -235,6 +236,7 @@ int main() try
 	// Global GL state
 	OGL_CHECKPOINT_ALWAYS();
 
+	// OPENGL State Setup
 	glEnable(GL_FRAMEBUFFER_SRGB);   
 	glEnable(GL_DEPTH_TEST);         
 	glEnable(GL_CULL_FACE);          
@@ -254,12 +256,14 @@ int main() try
 	// Other initialization & loading
 	OGL_CHECKPOINT_ALWAYS();
 	
+	// Load terrain mesh and create VAO
 	SimpleMeshData terrainMesh = load_wavefront_obj("assets/cw2/parlahti.obj");
 	std::print("Loaded terrain mesh: {} vertices\n", terrainMesh.positions.size());
 
 	GLuint terrainVAO = create_vao(terrainMesh);
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
+	// Shader program
 	ShaderProgram prog({
 		{ GL_VERTEX_SHADER,   "assets/cw2/default.vert" },
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
@@ -296,7 +300,7 @@ int main() try
 			glViewport( 0, 0, nwidth, nheight );
 		}
 
-		// Update state
+		// Fixed camera setup
 		float aspect = fbwidth / fbheight;
 
 		Mat44f projection = make_perspective_projection(
@@ -306,8 +310,8 @@ int main() try
 			1000.0f
 		);
 
+		// Move world down and back so terrain is visible
 		Mat44f view = make_translation(Vec3f{ 0.f, -20.f, -80.f });
-
 		Mat44f model = kIdentity44f;
 
 		Mat44f mvp = projection * view * model;
@@ -316,10 +320,9 @@ int main() try
 		// Draw scene
 		OGL_CHECKPOINT_DEBUG();
 
-
+		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		// Draw Frame
 		glUseProgram(prog.programId());
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 
