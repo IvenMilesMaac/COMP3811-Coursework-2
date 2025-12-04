@@ -21,6 +21,7 @@
 
 #include "../vmlib/vec4.hpp"
 #include "../vmlib/mat44.hpp"
+#include "../vmlib/mat33.hpp"
 
 #include "defaults.hpp"
 
@@ -313,12 +314,6 @@ int main() try
 	GLuint terrainVAO = create_vao(terrainMesh);
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
-	// Shader program
-	ShaderProgram prog({
-		{ GL_VERTEX_SHADER,   "assets/cw2/default.vert" },
-		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
-		});
-
 	OGL_CHECKPOINT_ALWAYS();
 
 	// Main loop
@@ -407,12 +402,18 @@ int main() try
 		);
 		Mat44f model = kIdentity44f;
 		Mat44f mvp = projection * camera_view * model;
+		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
+		Vec3f lightDir = normalize(Vec3f{-1.f, 1.f, 0.5f});
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		glUseProgram(prog.programId());
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		glUniform3fv(2, 1, &lightDir.x);
+		glUniform3f(3, 1.f, 1.f, 1.f);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 
 		glBindVertexArray(terrainVAO);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(terrainVertexCount));
