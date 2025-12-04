@@ -204,4 +204,18 @@ Mat44f make_perspective_projection( float aFovInRadians, float aAspect, float aN
 	return m;
 }
 
+// Added fuction for camera view matrix
+inline
+Mat44f construct_camera_view(Vec3f const& forward, Vec3f const& up, Vec3f const& right, Vec3f const& position)
+{
+	Mat44f view = Mat44f{ {
+		right.x,   right.y,    right.z,    -dot(right, position),
+		up.x,      up.y,       up.z,       -dot(up, position),
+		-forward.x, -forward.y, -forward.z, dot(forward, position),
+		0.f,       0.f,        0.f,        1.f
+	} };
+
+	return view;
+};
+
 #endif // MAT44_HPP_E7187A26_469E_48AD_A3D2_63150F05A4CA
