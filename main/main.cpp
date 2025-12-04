@@ -175,7 +175,7 @@ int main() try
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
 	state.prog = &prog;
-	state.camControl.position = Vec3f{ 0.f, 0.f, 5.f };
+	state.camControl.position = Vec3f{ 0.f, -20.f, -80.f };
 
 	// Animation state
 	auto last = Clock::now();
@@ -270,9 +270,10 @@ int main() try
 		Mat44f projection = make_perspective_projection(
 			60.f * std::numbers::pi_v<float> / 180.f,
 			fbwidth / float(fbheight),
-			0.1f, 100.0f
+			0.1f, 1000.0f
 		);
-		Mat44f projCameraWorld = projection * camera_view;
+		Mat44f model = kIdentity44f;
+		Mat44f projCameraWorld = projection * camera_view * model;
 
 		// Draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
