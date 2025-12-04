@@ -109,11 +109,11 @@ namespace
 				// Normals
 				if (idx.normal_index >= 0)
 				{
-					ret.normals.emplace_back(Vec3f{
+					ret.normals.emplace_back(normalize(Vec3f{
 						result.attributes.normals[idx.normal_index * 3 + 0],
 						result.attributes.normals[idx.normal_index * 3 + 1],
 						result.attributes.normals[idx.normal_index * 3 + 2]
-						});
+						}));
 				}
 
 				// Texture coordinates
@@ -544,8 +544,8 @@ namespace
 				auto const dx = float(aX - state->camControl.lastX);
 				auto const dy = float(aY - state->camControl.lastY);
 
-				state->camControl.phi += dx * kMouseSens;
-				state->camControl.theta += dy * kMouseSens;
+				state->camControl.phi -= dx * kMouseSens;
+				state->camControl.theta -= dy * kMouseSens;
 				
 				if (state->camControl.theta > kPi/2.f)
 					state->camControl.theta = kPi / 2.f;

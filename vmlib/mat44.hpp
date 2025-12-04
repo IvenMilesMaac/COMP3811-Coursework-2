@@ -209,9 +209,9 @@ inline
 Mat44f construct_camera_view(Vec3f const& forward, Vec3f const& up, Vec3f const& right, Vec3f const& position)
 {
 	Mat44f view = Mat44f{ {
-		right.x,	up.x,		-forward.x,		-dot(right, position),
-		right.y,	up.y,		-forward.y,		-dot(up, position),
-		right.z,	up.z,		-forward.z,		dot(forward, position),
+		right.x,	right.y,		right.z,		-dot(right, position),
+		up.x,	up.y,		up.z,		-dot(up, position),
+		-forward.x,	-forward.y,		-forward.z,		dot(forward, position),
 		0.f,		0.f,        0.f,			1.f
 	} };
 
