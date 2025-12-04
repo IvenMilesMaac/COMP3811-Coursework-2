@@ -8,6 +8,11 @@
 
 #include <cstdlib>
 
+#include <vector> 
+#include <rapidobj/rapidobj.hpp> 
+#include "../vmlib/vec2.hpp"
+#include "../vmlib/vec3.hpp"
+
 #include "../support/error.hpp"
 #include "../support/program.hpp"
 #include "../support/checkpoint.hpp"
@@ -36,6 +41,118 @@ namespace
 		~GLFWWindowDeleter();
 		GLFWwindow* window;
 	};
+
+	struct SimpleMeshData
+	{
+		std::vector<Vec3f> positions;
+		std::vector<Vec3f> normals;
+		std::vector<Vec2f> texcoords;
+	};
+
+	SimpleMeshData load_wavefront_obj(char const* path)
+	{
+		auto result = rapidobj::ParseFile(path);
+		if (result.error)
+			throw Error("Unable to load OBJ file '{}': {}", path, result.error.code.message());
+
+		rapidobj::Triangulate(result);
+
+		SimpleMeshData ret;
+
+		for (auto const& shape : result.shapes)
+		{
+			for (std::size_t i = 0; i < shape.mesh.indices.size(); ++i)
+			{
+				auto const& idx = shape.mesh.indices[i];
+
+				// Positions
+				ret.positions.emplace_back(Vec3f{
+					result.attributes.positions[idx.position_index * 3 + 0],
+					result.attributes.positions[idx.position_index * 3 + 1],
+					result.attributes.positions[idx.position_index * 3 + 2]
+					});
+
+				// Normals
+				if (idx.normal_index >= 0)
+				{
+					ret.normals.emplace_back(Vec3f{
+						result.attributes.normals[idx.normal_index * 3 + 0],
+						result.attributes.normals[idx.normal_index * 3 + 1],
+						result.attributes.normals[idx.normal_index * 3 + 2]
+						});
+				}
+
+				// Texture coordinates
+				if (idx.texcoord_index >= 0)
+				{
+					ret.texcoords.emplace_back(Vec2f{
+						result.attributes.texcoords[idx.texcoord_index * 2 + 0],
+						result.attributes.texcoords[idx.texcoord_index * 2 + 1]
+						});
+				}
+			}
+		}
+		return ret;
+	}
+
+	GLuint create_vao(SimpleMeshData const& meshData)
+	{
+		GLuint vao = 0;
+		glGenVertexArrays(1, &vao);
+		glBindVertexArray(vao);
+
+		// Positions at location 0
+		if (!meshData.positions.empty())
+		{
+			GLuint vbo = 0;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glBufferData(
+				GL_ARRAY_BUFFER,
+				meshData.positions.size() * sizeof(Vec3f),
+				meshData.positions.data(),
+				GL_STATIC_DRAW
+			);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(0);
+		}
+
+		// Normals at location 1
+		if (!meshData.normals.empty())
+		{
+			GLuint vbo = 0;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glBufferData(
+				GL_ARRAY_BUFFER,
+				meshData.normals.size() * sizeof(Vec3f),
+				meshData.normals.data(),
+				GL_STATIC_DRAW
+			);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(1);
+		}
+
+		// Texcoords at location 2 (for later tasks)
+		if (!meshData.texcoords.empty())
+		{
+			GLuint vbo = 0;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glBufferData(
+				GL_ARRAY_BUFFER,
+				meshData.texcoords.size() * sizeof(Vec2f),
+				meshData.texcoords.data(),
+				GL_STATIC_DRAW
+			);
+			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(2);
+		}
+
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		return vao;
+	}
 
 }
 
@@ -118,7 +235,10 @@ int main() try
 	// Global GL state
 	OGL_CHECKPOINT_ALWAYS();
 
-	// TODO: global GL setup goes here
+	glEnable(GL_FRAMEBUFFER_SRGB);   
+	glEnable(GL_DEPTH_TEST);         
+	glEnable(GL_CULL_FACE);          
+	glClearColor(0.2f, 0.2f, 0.2f, 1.0f); 
 
 	OGL_CHECKPOINT_ALWAYS();
 
@@ -134,7 +254,16 @@ int main() try
 	// Other initialization & loading
 	OGL_CHECKPOINT_ALWAYS();
 	
-	// TODO: global GL setup goes here
+	SimpleMeshData terrainMesh = load_wavefront_obj("assets/cw2/parlahti.obj");
+	std::print("Loaded terrain mesh: {} vertices\n", terrainMesh.positions.size());
+
+	GLuint terrainVAO = create_vao(terrainMesh);
+	std::size_t terrainVertexCount = terrainMesh.positions.size();
+
+	ShaderProgram prog({
+		{ GL_VERTEX_SHADER,   "assets/cw2/default.vert" },
+		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
+		});
 
 	OGL_CHECKPOINT_ALWAYS();
 
@@ -168,12 +297,37 @@ int main() try
 		}
 
 		// Update state
-		//TODO: update state
+		float aspect = fbwidth / fbheight;
+
+		Mat44f projection = make_perspective_projection(
+			60.f * std::numbers::pi_v<float> / 180.f,
+			aspect,
+			0.1f,
+			1000.0f
+		);
+
+		Mat44f view = make_translation(Vec3f{ 0.f, -20.f, -80.f });
+
+		Mat44f model = kIdentity44f;
+
+		Mat44f mvp = projection * view * model;
+
 
 		// Draw scene
 		OGL_CHECKPOINT_DEBUG();
 
-		//TODO: draw frame
+
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		// Draw Frame
+		glUseProgram(prog.programId());
+		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+
+		glBindVertexArray(terrainVAO);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(terrainVertexCount));
+		glBindVertexArray(0);
+
+		glUseProgram(0);
 
 		OGL_CHECKPOINT_DEBUG();
 
