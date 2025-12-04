@@ -35,12 +35,20 @@ namespace
 		struct CamCtrl_
 		{
 			bool cameraActive;
-			bool actionForward, actionBackward, actionLeft, actionRight, actionUp, actionDown;
-			bool actionSpeedUp, actionSlowDown;
+			bool actionForward;
+			bool actionBackward;
+			bool actionLeft;
+			bool actionRight;
+			bool actionUp;
+			bool actionDown;
+			bool actionSpeedUp;
+			bool actionSlowDown;
 
-			float phi, theta;
+			float phi;
+			float theta;
 
-			float lastX, lastY;
+			float lastX;
+			float lastY;
 
 			Vec3f position;
 		} camControl;
@@ -48,6 +56,7 @@ namespace
 	
 	void glfw_callback_error_( int, char const* );
 
+	void glfw_callback_mouse_button_(GLFWwindow*, int, int, int);
 	void glfw_callback_key_( GLFWwindow*, int, int, int, int );
 	void glfw_callback_motion_(GLFWwindow*, double, double);
 
@@ -119,6 +128,7 @@ int main() try
 	State_ state{};
 	glfwSetWindowUserPointer(window, &state);
 
+	glfwSetMouseButtonCallback(window, &glfw_callback_mouse_button_);
 	glfwSetKeyCallback( window, &glfw_callback_key_ );
 	glfwSetCursorPosCallback(window, &glfw_callback_motion_);
 
@@ -165,7 +175,7 @@ int main() try
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
 	state.prog = &prog;
-	state.camControl.position = Vec3f{0.f, 0.f, 5.f};
+	state.camControl.position = Vec3f{ 0.f, 0.f, 5.f };
 
 	// Animation state
 	auto last = Clock::now();
@@ -296,6 +306,24 @@ namespace
 		std::print( stderr, "GLFW error: {} ({})\n", aErrDesc, aErrNum );
 	}
 
+	void glfw_callback_mouse_button_(GLFWwindow* aWindow, int aButton, int aAction, int mods)
+	{
+		// activate / deactivate camera control
+		if (GLFW_MOUSE_BUTTON_RIGHT == aButton && GLFW_PRESS == aAction)
+		{
+			auto* state = static_cast<State_*>(glfwGetWindowUserPointer(aWindow));
+			if (state)
+			{
+				state->camControl.cameraActive = !state->camControl.cameraActive;
+
+				if (state->camControl.cameraActive)
+					glfwSetInputMode(aWindow, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+				else
+					glfwSetInputMode(aWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			}
+		}
+	}
+
 	void glfw_callback_key_( GLFWwindow* aWindow, int aKey, int, int aAction, int )
 	{
 		if( GLFW_KEY_ESCAPE == aKey && GLFW_PRESS == aAction )
@@ -306,76 +334,62 @@ namespace
 
 		if (auto* state = static_cast<State_*>(glfwGetWindowUserPointer(aWindow)))
 		{
-			// activate / deactivate camera control
-			if (GLFW_MOUSE_BUTTON_RIGHT == aKey && GLFW_PRESS == aAction)
-			{
-				state->camControl.cameraActive = !state->camControl.cameraActive;
-
-				if (state->camControl.cameraActive)
-					glfwSetInputMode(aWindow, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
-				else
-					glfwSetInputMode(aWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-			}
-
 			// camera controls if camera is active
-			if (state->camControl.cameraActive)
+			if (GLFW_KEY_W == aKey)
 			{
-				if (GLFW_KEY_W == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionForward = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionForward = false;
-				}
-				else if (GLFW_KEY_S == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionBackward = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionBackward = false;
-				}
-				else if (GLFW_KEY_A == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionLeft = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionLeft = false;
-				}
-				else if (GLFW_KEY_D == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionRight = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionRight = false;
-				}
-				else if (GLFW_KEY_Q == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionDown = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionDown = false;
-				}
-				else if (GLFW_KEY_E == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionUp = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionUp = false;
-				}
-				else if (GLFW_KEY_LEFT_SHIFT == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionSpeedUp = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionSpeedUp = false;
-				}
-				else if (GLFW_KEY_LEFT_CONTROL == aKey)
-				{
-					if (GLFW_PRESS == aAction)
-						state->camControl.actionSlowDown = true;
-					else if (GLFW_RELEASE == aAction)
-						state->camControl.actionSlowDown = false;
-				}
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionForward = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionForward = false;
+			}
+			else if (GLFW_KEY_S == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionBackward = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionBackward = false;
+			}
+			else if (GLFW_KEY_A == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionLeft = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionLeft = false;
+			}
+			else if (GLFW_KEY_D == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionRight = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionRight = false;
+			}
+			else if (GLFW_KEY_Q == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionDown = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionDown = false;
+			}
+			else if (GLFW_KEY_E == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionUp = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionUp = false;
+			}
+			else if (GLFW_KEY_LEFT_SHIFT == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionSpeedUp = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionSpeedUp = false;
+			}
+			else if (GLFW_KEY_LEFT_CONTROL == aKey)
+			{
+				if (GLFW_PRESS == aAction)
+					state->camControl.actionSlowDown = true;
+				else if (GLFW_RELEASE == aAction)
+					state->camControl.actionSlowDown = false;
 			}
 		}
 	}
