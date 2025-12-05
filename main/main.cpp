@@ -328,8 +328,8 @@ int main() try
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
 	state.prog = &prog;
-	state.camControl.position = Vec3f{0.f,100.f,0.f }; // camera moved up
-	state.camControl.theta = -0.5f; // look down
+	state.camControl.position = Vec3f{0.f,100.f,0.f }; 
+	state.camControl.theta = -0.5f; 
 
 	// Animation state
 	auto last = Clock::now();
