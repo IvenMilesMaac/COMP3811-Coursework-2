@@ -2,7 +2,6 @@
 
 in vec2 v2fTexcoord;
 in vec3 v2fNormal;
-in vec3 v2fColor;
 
 layout(location = 2) uniform vec3 uLightDir;
 layout(location = 3) uniform vec3 uLightDiffuse;

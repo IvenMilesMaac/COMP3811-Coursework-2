@@ -8,13 +8,11 @@ layout(location = 0) uniform mat4 uMVP;
 layout(location = 1) uniform mat3 uNormalMatrix;
 
 out vec3 v2fNormal;
-out vec3 v2fColor;
 out vec2 v2fTexcoord;
 
 void main()
 {
 	v2fNormal = normalize(uNormalMatrix * aNormal);
-	v2fColor = vec3(0.8f, 0.8f, 0.8f);
 	v2fTexcoord = aTexcoord;
 	gl_Position = uMVP * vec4(aPosition, 1.0);
 }
