@@ -25,6 +25,9 @@
 
 #include "defaults.hpp"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "../third_party/stb/include/stb_image.h"
+
 
 constexpr float kPi = std::numbers::pi_v<float>;
 
@@ -189,6 +192,33 @@ namespace
 		return vao;
 	}
 
+	GLuint loadTexture(const char* filename)
+	{
+		int width, height, channels;
+		unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+
+		if (!data) {
+			throw Error("Failed to load texture file '{}'", filename);
+		}
+
+		GLuint textureID;
+		glGenTextures(1, &textureID);
+		glBindTexture(GL_TEXTURE_2D, textureID);
+
+		GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
+		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+		stbi_image_free(data);
+
+		return textureID;
+	}
+
 }
 
 int main() try
@@ -298,7 +328,8 @@ int main() try
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
 	state.prog = &prog;
-	state.camControl.position = Vec3f{ 0.f, -20.f, -80.f };
+	state.camControl.position = Vec3f{0.f,100.f,0.f }; 
+	state.camControl.theta = -0.5f; 
 
 	// Animation state
 	auto last = Clock::now();
@@ -309,8 +340,12 @@ int main() try
 	
 	// Load terrain mesh and create VAO
 	SimpleMeshData terrainMesh = load_wavefront_obj("assets/cw2/parlahti.obj");
-	std::print("Loaded terrain mesh: {} vertices\n", terrainMesh.positions.size());
+	std::print("Loaded terrain mesh: {} vertices, {} texcoords\n", terrainMesh.positions.size(), terrainMesh.texcoords.size());
+	
+	// Load texture
+	GLuint texture = loadTexture("assets/cw2/L4343A-4k.jpeg");
 
+	// Create VAO
 	GLuint terrainVAO = create_vao(terrainMesh);
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
@@ -403,17 +438,22 @@ int main() try
 		Mat44f model = kIdentity44f;
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
-		Vec3f lightDir = normalize(Vec3f{-1.f, 1.f, 0.5f});
+		Vec3f lightDir = normalize(Vec3f{0.f,1.f, -1.f });
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		glUseProgram(prog.programId());
-		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
-		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
-		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 1.f, 1.f, 1.f);
-		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+		glUniformMatrix4fv(0,1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1,1, GL_TRUE, normalMatrix.v);
+		glUniform3fv(2,1, &lightDir.x);
+		glUniform3f(3,1.f,1.f,1.f);
+		glUniform3f(4,0.05f,0.05f,0.05f);
+
+		// Bind texture to texture unit0 and set sampler uniform
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		glUniform1i(glGetUniformLocation(prog.programId(), "uTexture"),0);
 
 		glBindVertexArray(terrainVAO);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(terrainVertexCount));
