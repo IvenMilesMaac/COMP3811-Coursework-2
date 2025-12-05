@@ -195,7 +195,7 @@ namespace
 	GLuint loadTexture(const char* filename)
 	{
 		int width, height, channels;
-		unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+		stbi_uc* data = stbi_load(filename, &width, &height, &channels, 4);
 
 		if (!data) {
 			throw Error("Failed to load texture file '{}'", filename);
@@ -205,8 +205,7 @@ namespace
 		glGenTextures(1, &textureID);
 		glBindTexture(GL_TEXTURE_2D, textureID);
 
-		GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
-		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 		glGenerateMipmap(GL_TEXTURE_2D);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -448,7 +447,7 @@ int main() try
 		glUniformMatrix3fv(1,1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2,1, &lightDir.x);
 		glUniform3f(3,1.f,1.f,1.f);
-		glUniform3f(4,0.05f,0.05f,0.05f);
+		glUniform3f(4,0.1f,0.1f,0.1f);
 
 		// Bind texture to texture unit0 and set sampler uniform
 		glActiveTexture(GL_TEXTURE0);
