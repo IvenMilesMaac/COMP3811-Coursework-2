@@ -40,7 +40,8 @@ namespace
 
 	struct State_
 	{
-		ShaderProgram* prog;
+		ShaderProgram* progTex;
+		ShaderProgram* progMat;
 
 		struct CamCtrl_
 		{
@@ -85,9 +86,10 @@ namespace
 		std::vector<Vec3f> positions;
 		std::vector<Vec3f> normals;
 		std::vector<Vec2f> texcoords;
+		std::vector<float> materialIds;
 	};
 
-	SimpleMeshData load_wavefront_obj(char const* path)
+	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Vec3f>* materialColors = nullptr)
 	{
 		auto result = rapidobj::ParseFile(path);
 		if (result.error)
@@ -96,6 +98,17 @@ namespace
 		rapidobj::Triangulate(result);
 
 		SimpleMeshData ret;
+
+		// only if required
+		if (materialColors)
+		{
+			materialColors->resize(result.materials.size());
+			for (size_t i = 0; i < result.materials.size(); ++i)
+			{
+				auto const& mat = result.materials[i];
+				(*materialColors)[i] = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+			}
+		}
 
 		for (auto const& shape : result.shapes)
 		{
@@ -127,6 +140,14 @@ namespace
 						result.attributes.texcoords[idx.texcoord_index * 2 + 0],
 						result.attributes.texcoords[idx.texcoord_index * 2 + 1]
 						});
+				}
+
+				// Materials
+				if (materialColors)
+				{
+					int faceIndex = int(i / 3);
+					int matId = shape.mesh.material_ids[faceIndex];
+					ret.materialIds.push_back(float(matId));
 				}
 			}
 		}
@@ -171,7 +192,7 @@ namespace
 			glEnableVertexAttribArray(1);
 		}
 
-		// Texcoords at location 2 (for later tasks)
+		// Texcoords at location 2
 		if (!meshData.texcoords.empty())
 		{
 			GLuint vbo = 0;
@@ -185,6 +206,22 @@ namespace
 			);
 			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 			glEnableVertexAttribArray(2);
+		}
+
+		// Material IDs at location 3
+		if (!meshData.materialIds.empty())
+		{
+			GLuint vbo = 0;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glBufferData(
+				GL_ARRAY_BUFFER,
+				meshData.materialIds.size() * sizeof(float),
+				meshData.materialIds.data(),
+				GL_STATIC_DRAW
+			);
+			glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(3);
 		}
 
 		glBindVertexArray(0);
@@ -233,6 +270,7 @@ namespace
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
+		glUseProgram(programId);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2, 1, &lightDir.x);
@@ -255,6 +293,7 @@ namespace
 		GLuint programId,
 		Vec3f const& lightDir,
 		Mat44f const& model,
+		std::vector<Vec3f> const& colors,
 		GLuint vao,
 		std::size_t vertexCount
 	)
@@ -262,14 +301,21 @@ namespace
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
+		glUseProgram(programId);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2, 1, &lightDir.x);
 		glUniform3f(3, 1.f, 1.f, 1.f);
 		glUniform3f(4, 0.1f, 0.1f, 0.1f);
 
-		// Use object's material definitions
-		
+		// Pass material colors
+		for (size_t i = 0; i < colors.size(); ++i)
+		{
+			std::string name = "uMaterialDiffuse[" + std::to_string(i) + "]";
+			GLint loc = glGetUniformLocation(programId, name.c_str());
+			if (loc >= 0)
+				glUniform3fv(loc, 1, &colors[i].x);
+		}
 
 		glBindVertexArray(vao);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
@@ -377,14 +423,21 @@ int main() try
 	glViewport( 0, 0, iwidth, iheight );
 
 	// Other initialization & loading
-
-	// Load shader program
-	ShaderProgram prog({
+	
+	// Load shader programs
+	ShaderProgram progTerrain({
 		{ GL_VERTEX_SHADER, "assets/cw2/default.vert" },
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
-	state.prog = &prog;
-	state.camControl.position = Vec3f{0.f,100.f,0.f }; 
+	state.progTex = &progTerrain;
+
+	ShaderProgram progPads({
+		{GL_VERTEX_SHADER, "assets/cw2/material.vert"},
+		{GL_FRAGMENT_SHADER, "assets/cw2/material.frag"}
+	});
+	state.progMat = &progPads;
+
+	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
 	state.camControl.theta = -0.5f; 
 
 	// Animation state
@@ -401,7 +454,8 @@ int main() try
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
 	// Load landing_pad mesh and create VAO
-	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj");
+	std::vector<Vec3f> padColors;
+	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj", &padColors);
 	std::print("Loaded landing_pad mesh: {} vertices, {} texcoords\n", padMesh.positions.size(), padMesh.texcoords.size());
 	GLuint padVAO = create_vao(padMesh);
 	std::size_t padVertexCount = padMesh.positions.size();
@@ -500,21 +554,20 @@ int main() try
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glUseProgram(prog.programId());
 		Mat44f padModel = kIdentity44f;
 
-		drawTerrain(projection, camera_view, prog.programId(),
+		drawTerrain(projection, camera_view, progTerrain.programId(),
 			lightDir, texture,
 			terrainVAO, terrainVertexCount
 		);
-		padModel = make_translation(Vec3f{0.f, 50.f, 0.f});
-		drawLandingPad(projection, camera_view, prog.programId(),
-			lightDir, padModel,
+		padModel = make_translation(Vec3f{10.f, -0.95f, 45.f});
+		drawLandingPad(projection, camera_view, progPads.programId(),
+			lightDir, padModel, padColors,
 			padVAO, padVertexCount
 		);
-		padModel = make_translation(Vec3f{0.f, 25.f, 0.f});
-		drawLandingPad(projection, camera_view, prog.programId(),
-			lightDir, padModel,
+		padModel = make_translation(Vec3f{20.f, -0.95f, -50.f});
+		drawLandingPad(projection, camera_view, progPads.programId(),
+			lightDir, padModel, padColors,
 			padVAO, padVertexCount
 		);
 		glUseProgram(0);
