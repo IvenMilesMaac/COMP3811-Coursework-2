@@ -560,12 +560,12 @@ int main() try
 			lightDir, texture,
 			terrainVAO, terrainVertexCount
 		);
-		padModel = make_translation(Vec3f{10.f, -0.95f, 45.f});
+		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
 			lightDir, padModel, padColors,
 			padVAO, padVertexCount
 		);
-		padModel = make_translation(Vec3f{20.f, -0.95f, -50.f});
+		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
 			lightDir, padModel, padColors,
 			padVAO, padVertexCount
