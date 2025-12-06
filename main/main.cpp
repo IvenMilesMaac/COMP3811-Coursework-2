@@ -248,6 +248,33 @@ namespace
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
 	}
+
+	void drawLandingPad(
+		Mat44f const& projection,
+		Mat44f const& camera_view,
+		GLuint programId,
+		Vec3f const& lightDir,
+		Mat44f const& model,
+		GLuint vao,
+		std::size_t vertexCount
+	)
+	{
+		Mat44f mvp = projection * camera_view * model;
+		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
+
+		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		glUniform3fv(2, 1, &lightDir.x);
+		glUniform3f(3, 1.f, 1.f, 1.f);
+		glUniform3f(4, 0.1f, 0.1f, 0.1f);
+
+		// Use object's material definitions
+		
+
+		glBindVertexArray(vao);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
+		glBindVertexArray(0);
+	}
 }
 
 int main() try
@@ -474,11 +501,22 @@ int main() try
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glUseProgram(prog.programId());
+		Mat44f padModel = kIdentity44f;
+
 		drawTerrain(projection, camera_view, prog.programId(),
 			lightDir, texture,
 			terrainVAO, terrainVertexCount
 		);
-
+		padModel = make_translation(Vec3f{0.f, 50.f, 0.f});
+		drawLandingPad(projection, camera_view, prog.programId(),
+			lightDir, padModel,
+			padVAO, padVertexCount
+		);
+		padModel = make_translation(Vec3f{0.f, 25.f, 0.f});
+		drawLandingPad(projection, camera_view, prog.programId(),
+			lightDir, padModel,
+			padVAO, padVertexCount
+		);
 		glUseProgram(0);
 
 		OGL_CHECKPOINT_DEBUG();
