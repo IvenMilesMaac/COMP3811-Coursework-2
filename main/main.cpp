@@ -233,7 +233,6 @@ namespace
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
-		glUseProgram(programId);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2, 1, &lightDir.x);
@@ -474,6 +473,7 @@ int main() try
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glUseProgram(prog.programId());
 		drawTerrain(projection, camera_view, prog.programId(),
 			lightDir, texture,
 			terrainVAO, terrainVertexCount
