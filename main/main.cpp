@@ -195,7 +195,7 @@ namespace
 	GLuint loadTexture(const char* filename)
 	{
 		int width, height, channels;
-		unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+		stbi_uc* data = stbi_load(filename, &width, &height, &channels, 4);
 
 		if (!data) {
 			throw Error("Failed to load texture file '{}'", filename);
@@ -205,8 +205,7 @@ namespace
 		glGenTextures(1, &textureID);
 		glBindTexture(GL_TEXTURE_2D, textureID);
 
-		GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
-		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 		glGenerateMipmap(GL_TEXTURE_2D);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -219,6 +218,36 @@ namespace
 		return textureID;
 	}
 
+
+	void drawTerrain(
+		Mat44f const& projection,
+		Mat44f const& camera_view, 
+		GLuint programId, 
+		Vec3f const& lightDir,
+		GLuint texture,
+		GLuint vao,
+		std::size_t vertexCount
+	)
+	{
+		Mat44f model = kIdentity44f;
+		Mat44f mvp = projection * camera_view * model;
+		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
+
+		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		glUniform3fv(2, 1, &lightDir.x);
+		glUniform3f(3, 1.f, 1.f, 1.f);
+		glUniform3f(4, 0.1f, 0.1f, 0.1f);
+
+		// Bind texture to texture unit0 and set sampler uniform
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		glUniform1i(glGetUniformLocation(programId, "uTexture"), 0);
+
+		glBindVertexArray(vao);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
+		glBindVertexArray(0);
+	}
 }
 
 int main() try
@@ -341,13 +370,18 @@ int main() try
 	// Load terrain mesh and create VAO
 	SimpleMeshData terrainMesh = load_wavefront_obj("assets/cw2/parlahti.obj");
 	std::print("Loaded terrain mesh: {} vertices, {} texcoords\n", terrainMesh.positions.size(), terrainMesh.texcoords.size());
-	
+	GLuint terrainVAO = create_vao(terrainMesh);
+	std::size_t terrainVertexCount = terrainMesh.positions.size();
+
+	// Load landing_pad mesh and create VAO
+	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj");
+	std::print("Loaded landing_pad mesh: {} vertices, {} texcoords\n", padMesh.positions.size(), padMesh.texcoords.size());
+	GLuint padVAO = create_vao(padMesh);
+	std::size_t padVertexCount = padMesh.positions.size();
+
 	// Load texture
 	GLuint texture = loadTexture("assets/cw2/L4343A-4k.jpeg");
 
-	// Create VAO
-	GLuint terrainVAO = create_vao(terrainMesh);
-	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
 	OGL_CHECKPOINT_ALWAYS();
 
@@ -435,29 +469,15 @@ int main() try
 			fbwidth / float(fbheight),
 			0.1f, 1000.0f
 		);
-		Mat44f model = kIdentity44f;
-		Mat44f mvp = projection * camera_view * model;
-		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 		Vec3f lightDir = normalize(Vec3f{0.f,1.f, -1.f });
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 		glUseProgram(prog.programId());
-		glUniformMatrix4fv(0,1, GL_TRUE, mvp.v);
-		glUniformMatrix3fv(1,1, GL_TRUE, normalMatrix.v);
-		glUniform3fv(2,1, &lightDir.x);
-		glUniform3f(3,1.f,1.f,1.f);
-		glUniform3f(4,0.05f,0.05f,0.05f);
-
-		// Bind texture to texture unit0 and set sampler uniform
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texture);
-		glUniform1i(glGetUniformLocation(prog.programId(), "uTexture"),0);
-
-		glBindVertexArray(terrainVAO);
-		glDrawArrays(GL_TRIANGLES, 0, GLsizei(terrainVertexCount));
-		glBindVertexArray(0);
+		drawTerrain(projection, camera_view, prog.programId(),
+			lightDir, texture,
+			terrainVAO, terrainVertexCount
+		);
 
 		glUseProgram(0);
 
