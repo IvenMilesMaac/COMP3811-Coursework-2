@@ -305,8 +305,8 @@ namespace
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 1.f, 1.f, 1.f);
-		glUniform3f(4, 0.1f, 0.1f, 0.1f);
+		glUniform3f(3, 0.9f, 0.9f, 0.6f);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 
 		// Pass material colors
 		for (size_t i = 0; i < colors.size(); ++i)
