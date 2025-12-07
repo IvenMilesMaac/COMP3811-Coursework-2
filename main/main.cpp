@@ -64,11 +64,11 @@ namespace
 			Vec3f position;
 		} camControl;
 	};
-	
-	void glfw_callback_error_( int, char const* );
+
+	void glfw_callback_error_(int, char const*);
 
 	void glfw_callback_mouse_button_(GLFWwindow*, int, int, int);
-	void glfw_callback_key_( GLFWwindow*, int, int, int, int );
+	void glfw_callback_key_(GLFWwindow*, int, int, int, int);
 	void glfw_callback_motion_(GLFWwindow*, double, double);
 
 	struct GLFWCleanupHelper
@@ -106,7 +106,7 @@ namespace
 			for (size_t i = 0; i < result.materials.size(); ++i)
 			{
 				auto const& mat = result.materials[i];
-				(*materialColors)[i] = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+				(*materialColors)[i] = Vec3f{ mat.diffuse[0], mat.diffuse[1], mat.diffuse[2] };
 			}
 		}
 
@@ -258,8 +258,8 @@ namespace
 
 	void drawTerrain(
 		Mat44f const& projection,
-		Mat44f const& camera_view, 
-		GLuint programId, 
+		Mat44f const& camera_view,
+		GLuint programId,
 		Vec3f const& lightDir,
 		GLuint texture,
 		GLuint vao,
@@ -321,7 +321,6 @@ namespace
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
 	}
-}
 
 	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
 	{
@@ -557,6 +556,7 @@ namespace
 		return mesh;
 	}
 
+
 	SimpleMeshData create_cone(float radius = 0.5f, float height = 1.0f, int segments = 32)
 	{
 		SimpleMeshData mesh;
@@ -655,7 +655,7 @@ namespace
 		// Three protruded box engines around the base 
 		for (int i = 0; i < 3; ++i)
 		{
-			float angle = (float(i) / 3.0f) * 2.0f * kPi;  
+			float angle = (float(i) / 3.0f) * 2.0f * kPi;
 
 			float finThickness = 0.2f;
 			float finHeight = 1.5f;
@@ -678,6 +678,7 @@ namespace
 
 		return vehicle;
 	}
+}
 
 int main() try
 {
