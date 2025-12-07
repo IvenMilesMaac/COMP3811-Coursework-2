@@ -94,6 +94,12 @@ namespace
 		float shine;
 	};
 
+	struct DirectionalLight {
+		Vec3f direction;
+		Vec3f color;
+		bool enabled;
+	};
+
 	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Material>* materials = nullptr)
 	{
 		auto result = rapidobj::ParseFile(path);
@@ -261,15 +267,25 @@ namespace
 		return textureID;
 	}
 
+	void setGlobalLight(GLuint programId, DirectionalLight const& light)
+	{
+		GLint locDir = glGetUniformLocation(programId, "uGlobalLight.direction");
+		GLint locColor = glGetUniformLocation(programId, "uGlobalLight.color");
+		GLint locEnabled = glGetUniformLocation(programId, "uGlobalLight.enabled");
+
+		glUniform3fv(locDir, 1, &light.direction.x);
+		glUniform3fv(locColor, 1, &light.color.x);
+		glUniform1i(locEnabled, light.enabled);
+	}
 
 	void drawTerrain(
 		Mat44f const& projection,
 		Mat44f const& camera_view, 
 		GLuint programId, 
-		Vec3f const& lightDir,
 		GLuint texture,
 		GLuint vao,
-		std::size_t vertexCount
+		std::size_t vertexCount,
+		DirectionalLight const& light
 	)
 	{
 		Mat44f model = kIdentity44f;
@@ -277,11 +293,11 @@ namespace
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
+		setGlobalLight(programId, light);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
-		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 0.9f, 0.9f, 0.6f);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+		glUniform1i(5, true);
 
 		// Bind texture to texture unit0 and set sampler uniform
 		glActiveTexture(GL_TEXTURE0);
@@ -297,21 +313,20 @@ namespace
 		Mat44f const& projection,
 		Mat44f const& camera_view,
 		GLuint programId,
-		Vec3f const& lightDir,
 		Mat44f const& model,
 		std::vector<Material> const& materials,
 		GLuint vao,
-		std::size_t vertexCount
+		std::size_t vertexCount,
+		DirectionalLight const& light
 	)
 	{
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
+		setGlobalLight(programId, light);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
-		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 0.9f, 0.9f, 0.6f);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 
 		// Pass material colors
@@ -319,21 +334,19 @@ namespace
 		std::string name;
 		for (size_t i = 0; i < materials.size(); ++i)
 		{
-
 			name = "uMaterialDiffuse[" + std::to_string(i) + "]";
 			loc = glGetUniformLocation(programId, name.c_str());
 			glUniform3fv(loc, 1, &materials[i].diffuse.x);
 
-			name = "uMaterialShine[" + std::to_string(i) + "]";
+			/*name = "uMaterialShine[" + std::to_string(i) + "]";
 			loc = glGetUniformLocation(programId, name.c_str());
-			glUniform1f(loc, materials[i].shine);
+			glUniform1f(loc, materials[i].shine);*/
 		}
 
 		glBindVertexArray(vao);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
 	}
-}
 
 	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
 	{
@@ -667,7 +680,7 @@ namespace
 		// Three protruded box engines around the base 
 		for (int i = 0; i < 3; ++i)
 		{
-			float angle = (float(i) / 3.0f) * 2.0f * kPi;  
+			float angle = (float(i) / 3.0f) * 2.0f * kPi;
 
 			float finThickness = 0.2f;
 			float finHeight = 1.5f;
@@ -690,6 +703,9 @@ namespace
 
 		return vehicle;
 	}
+}
+
+	
 
 int main() try
 {
@@ -806,8 +822,16 @@ int main() try
 	});
 	state.progMat = &progPads;
 
+	// Initialize camera
 	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
 	state.camControl.theta = -0.5f; 
+
+	// Initialize global light source
+	DirectionalLight globalLight{
+		Vec3f{0.1f, 1.f, -1.f},
+		Vec3f{0.9f, 0.9f, 0.6f},
+		true
+	};
 
 	// Animation state
 	auto last = Clock::now();
@@ -934,18 +958,17 @@ int main() try
 		Mat44f padModel = kIdentity44f;
 
 		drawTerrain(projection, camera_view, progDefault.programId(),
-			lightDir, texture,
-			terrainVAO, terrainVertexCount
+			texture, terrainVAO, terrainVertexCount, globalLight
 		);
 		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
-			lightDir, padModel, padMaterials,
-			padVAO, padVertexCount
+			padModel, padMaterials,
+			padVAO, padVertexCount, globalLight
 		);
 		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
-			lightDir, padModel, padMaterials,
-			padVAO, padVertexCount
+			padModel, padMaterials,
+			padVAO, padVertexCount, globalLight
 		);
 
 		// Draw Space Vehicle
@@ -957,9 +980,9 @@ int main() try
 		glUseProgram(progDefault.programId());
 		glUniformMatrix4fv(0, 1, GL_TRUE, vehicleMVP.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, vehicleNormalMatrix.v);
-		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 0.9f, 0.9f, 0.6f);
+		setGlobalLight(progDefault.programId(), globalLight);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+		glUniform1i(5, false);
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, texture);

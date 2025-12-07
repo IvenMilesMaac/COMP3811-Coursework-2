@@ -13,6 +13,7 @@ out vec2 v2fTexcoord;
 void main()
 {
 	v2fNormal = normalize(uNormalMatrix * aNormal);
+
 	v2fTexcoord = aTexcoord;
 	gl_Position = uMVP * vec4(aPosition, 1.0);
 }
