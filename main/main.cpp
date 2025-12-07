@@ -40,7 +40,8 @@ namespace
 
 	struct State_
 	{
-		ShaderProgram* prog;
+		ShaderProgram* progTex;
+		ShaderProgram* progMat;
 
 		struct CamCtrl_
 		{
@@ -85,9 +86,10 @@ namespace
 		std::vector<Vec3f> positions;
 		std::vector<Vec3f> normals;
 		std::vector<Vec2f> texcoords;
+		std::vector<float> materialIds;
 	};
 
-	SimpleMeshData load_wavefront_obj(char const* path)
+	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Vec3f>* materialColors = nullptr)
 	{
 		auto result = rapidobj::ParseFile(path);
 		if (result.error)
@@ -96,6 +98,17 @@ namespace
 		rapidobj::Triangulate(result);
 
 		SimpleMeshData ret;
+
+		// only if required
+		if (materialColors)
+		{
+			materialColors->resize(result.materials.size());
+			for (size_t i = 0; i < result.materials.size(); ++i)
+			{
+				auto const& mat = result.materials[i];
+				(*materialColors)[i] = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+			}
+		}
 
 		for (auto const& shape : result.shapes)
 		{
@@ -127,6 +140,14 @@ namespace
 						result.attributes.texcoords[idx.texcoord_index * 2 + 0],
 						result.attributes.texcoords[idx.texcoord_index * 2 + 1]
 						});
+				}
+
+				// Materials
+				if (materialColors)
+				{
+					int faceIndex = int(i / 3);
+					int matId = shape.mesh.material_ids[faceIndex];
+					ret.materialIds.push_back(float(matId));
 				}
 			}
 		}
@@ -171,7 +192,7 @@ namespace
 			glEnableVertexAttribArray(1);
 		}
 
-		// Texcoords at location 2 (for later tasks)
+		// Texcoords at location 2
 		if (!meshData.texcoords.empty())
 		{
 			GLuint vbo = 0;
@@ -185,6 +206,22 @@ namespace
 			);
 			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 			glEnableVertexAttribArray(2);
+		}
+
+		// Material IDs at location 3
+		if (!meshData.materialIds.empty())
+		{
+			GLuint vbo = 0;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, vbo);
+			glBufferData(
+				GL_ARRAY_BUFFER,
+				meshData.materialIds.size() * sizeof(float),
+				meshData.materialIds.data(),
+				GL_STATIC_DRAW
+			);
+			glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+			glEnableVertexAttribArray(3);
 		}
 
 		glBindVertexArray(0);
@@ -233,11 +270,12 @@ namespace
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
+		glUseProgram(programId);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3fv(2, 1, &lightDir.x);
-		glUniform3f(3, 1.f, 1.f, 1.f);
-		glUniform3f(4, 0.1f, 0.1f, 0.1f);
+		glUniform3f(3, 0.9f, 0.9f, 0.6f);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 
 		// Bind texture to texture unit0 and set sampler uniform
 		glActiveTexture(GL_TEXTURE0);
@@ -248,7 +286,398 @@ namespace
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
 	}
+
+	void drawLandingPad(
+		Mat44f const& projection,
+		Mat44f const& camera_view,
+		GLuint programId,
+		Vec3f const& lightDir,
+		Mat44f const& model,
+		std::vector<Vec3f> const& colors,
+		GLuint vao,
+		std::size_t vertexCount
+	)
+	{
+		Mat44f mvp = projection * camera_view * model;
+		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
+
+		glUseProgram(programId);
+		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		glUniform3fv(2, 1, &lightDir.x);
+		glUniform3f(3, 0.9f, 0.9f, 0.6f);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+
+		// Pass material colors
+		for (size_t i = 0; i < colors.size(); ++i)
+		{
+			std::string name = "uMaterialDiffuse[" + std::to_string(i) + "]";
+			GLint loc = glGetUniformLocation(programId, name.c_str());
+			if (loc >= 0)
+				glUniform3fv(loc, 1, &colors[i].x);
+		}
+
+		glBindVertexArray(vao);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
+		glBindVertexArray(0);
+	}
 }
+
+	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
+	{
+		SimpleMeshData mesh;
+
+		// side
+		for (int i = 0; i < segments; ++i)
+		{
+			float a0 = (float(i) / segments) * 2.0f * kPi;
+			float a1 = (float(i + 1) / segments) * 2.0f * kPi;
+
+			float x0 = radius * std::cos(a0);
+			float z0 = radius * std::sin(a0);
+			float x1 = radius * std::cos(a1);
+			float z1 = radius * std::sin(a1);
+
+			Vec3f v0{ x0, 0.0f, z0 };
+			Vec3f v1{ x0, height, z0 };
+			Vec3f v2{ x1, 0.0f, z1 };
+			Vec3f v3{ x1, height, z1 };
+
+			Vec3f n0 = normalize(Vec3f{ x0, 0.0f, z0 });
+			Vec3f n1 = normalize(Vec3f{ x1, 0.0f, z1 });
+
+			// tri 1
+			mesh.positions.push_back(v0);
+			mesh.positions.push_back(v1);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(n0);
+			mesh.normals.push_back(n0);
+			mesh.normals.push_back(n1);
+
+			// tri 2
+			mesh.positions.push_back(v1);
+			mesh.positions.push_back(v3);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(n0);
+			mesh.normals.push_back(n1);
+			mesh.normals.push_back(n1);
+		}
+
+		// top cap, normal +Y
+		for (int i = 0; i < segments; ++i)
+		{
+			float a0 = (float(i) / segments) * 2.0f * kPi;
+			float a1 = (float(i + 1) / segments) * 2.0f * kPi;
+
+			Vec3f c{ 0.0f, height, 0.0f };
+			Vec3f v1{ radius * std::cos(a1), height, radius * std::sin(a1) };
+			Vec3f v2{ radius * std::cos(a0), height, radius * std::sin(a0) };
+
+			mesh.positions.push_back(c);
+			mesh.positions.push_back(v1);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(Vec3f{ 0.0f, 1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, 1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, 1.0f, 0.0f });
+		}
+
+		// bottom cap, normal -Y
+		for (int i = 0; i < segments; ++i)
+		{
+			float a0 = (float(i) / segments) * 2.0f * kPi;
+			float a1 = (float(i + 1) / segments) * 2.0f * kPi;
+
+			Vec3f c{ 0.0f, 0.0f, 0.0f };
+			Vec3f v1{ radius * std::cos(a0), 0.0f, radius * std::sin(a0) };
+			Vec3f v2{ radius * std::cos(a1), 0.0f, radius * std::sin(a1) };
+
+			mesh.positions.push_back(c);
+			mesh.positions.push_back(v1);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+		}
+
+		return mesh;
+	}
+
+	SimpleMeshData create_box(float width = 1.0f, float height = 1.0f, float depth = 1.0f)
+	{
+		SimpleMeshData mesh;
+
+		float w = width * 0.5f;
+		float h = height * 0.5f;
+		float d = depth * 0.5f;
+
+		// Front face (+Z)
+		mesh.positions.push_back(Vec3f{ -w, -h, d });
+		mesh.positions.push_back(Vec3f{ w, -h, d });
+		mesh.positions.push_back(Vec3f{ w, h, d });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+
+		mesh.positions.push_back(Vec3f{ -w, -h, d });
+		mesh.positions.push_back(Vec3f{ w, h, d });
+		mesh.positions.push_back(Vec3f{ -w, h, d });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, 1 });
+
+		// Back face (-Z)
+		mesh.positions.push_back(Vec3f{ w, -h, -d });
+		mesh.positions.push_back(Vec3f{ -w, -h, -d });
+		mesh.positions.push_back(Vec3f{ -w, h, -d });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+
+		mesh.positions.push_back(Vec3f{ w, -h, -d });
+		mesh.positions.push_back(Vec3f{ -w, h, -d });
+		mesh.positions.push_back(Vec3f{ w, h, -d });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+		mesh.normals.push_back(Vec3f{ 0, 0, -1 });
+
+		// Top face (+Y)
+		mesh.positions.push_back(Vec3f{ -w, h, d });
+		mesh.positions.push_back(Vec3f{ w, h, d });
+		mesh.positions.push_back(Vec3f{ w, h, -d });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+
+		mesh.positions.push_back(Vec3f{ -w, h, d });
+		mesh.positions.push_back(Vec3f{ w, h, -d });
+		mesh.positions.push_back(Vec3f{ -w, h, -d });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, 1, 0 });
+
+		// Bottom face (-Y)
+		mesh.positions.push_back(Vec3f{ -w, -h, -d });
+		mesh.positions.push_back(Vec3f{ w, -h, -d });
+		mesh.positions.push_back(Vec3f{ w, -h, d });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+
+		mesh.positions.push_back(Vec3f{ -w, -h, -d });
+		mesh.positions.push_back(Vec3f{ w, -h, d });
+		mesh.positions.push_back(Vec3f{ -w, -h, d });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+		mesh.normals.push_back(Vec3f{ 0, -1, 0 });
+
+		// Right face (+X)
+		mesh.positions.push_back(Vec3f{ w, -h, d });
+		mesh.positions.push_back(Vec3f{ w, -h, -d });
+		mesh.positions.push_back(Vec3f{ w, h, -d });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+
+		mesh.positions.push_back(Vec3f{ w, -h, d });
+		mesh.positions.push_back(Vec3f{ w, h, -d });
+		mesh.positions.push_back(Vec3f{ w, h, d });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ 1, 0, 0 });
+
+		// Left face (-X)
+		mesh.positions.push_back(Vec3f{ -w, -h, -d });
+		mesh.positions.push_back(Vec3f{ -w, -h, d });
+		mesh.positions.push_back(Vec3f{ -w, h, d });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+
+		mesh.positions.push_back(Vec3f{ -w, -h, -d });
+		mesh.positions.push_back(Vec3f{ -w, h, d });
+		mesh.positions.push_back(Vec3f{ -w, h, -d });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+		mesh.normals.push_back(Vec3f{ -1, 0, 0 });
+
+		return mesh;
+	}
+
+	SimpleMeshData create_sphere(float radius = 0.5f, int segments = 32, int rings = 16)
+	{
+		SimpleMeshData mesh;
+
+		for (int ring = 0; ring < rings; ++ring)
+		{
+			float phi0 = kPi * float(ring) / rings;
+			float phi1 = kPi * float(ring + 1) / rings;
+
+			for (int seg = 0; seg < segments; ++seg)
+			{
+				float theta0 = 2.0f * kPi * float(seg) / segments;
+				float theta1 = 2.0f * kPi * float(seg + 1) / segments;
+
+				Vec3f v0{
+					radius * std::sin(phi0) * std::cos(theta0),
+					radius * std::cos(phi0),
+					radius * std::sin(phi0) * std::sin(theta0)
+				};
+				Vec3f v1{
+					radius * std::sin(phi0) * std::cos(theta1),
+					radius * std::cos(phi0),
+					radius * std::sin(phi0) * std::sin(theta1)
+				};
+				Vec3f v2{
+					radius * std::sin(phi1) * std::cos(theta1),
+					radius * std::cos(phi1),
+					radius * std::sin(phi1) * std::sin(theta1)
+				};
+				Vec3f v3{
+					radius * std::sin(phi1) * std::cos(theta0),
+					radius * std::cos(phi1),
+					radius * std::sin(phi1) * std::sin(theta0)
+				};
+
+				mesh.positions.push_back(v0);
+				mesh.positions.push_back(v1);
+				mesh.positions.push_back(v2);
+				mesh.normals.push_back(normalize(v0));
+				mesh.normals.push_back(normalize(v1));
+				mesh.normals.push_back(normalize(v2));
+
+				mesh.positions.push_back(v0);
+				mesh.positions.push_back(v2);
+				mesh.positions.push_back(v3);
+				mesh.normals.push_back(normalize(v0));
+				mesh.normals.push_back(normalize(v2));
+				mesh.normals.push_back(normalize(v3));
+			}
+		}
+
+		return mesh;
+	}
+
+	SimpleMeshData create_cone(float radius = 0.5f, float height = 1.0f, int segments = 32)
+	{
+		SimpleMeshData mesh;
+		Vec3f apex{ 0.0f, height, 0.0f };
+
+		// side
+		for (int i = 0; i < segments; ++i)
+		{
+			float a0 = (float(i) / segments) * 2.0f * kPi;
+			float a1 = (float(i + 1) / segments) * 2.0f * kPi;
+
+			Vec3f v0{ radius * std::cos(a0), 0.0f, radius * std::sin(a0) };
+			Vec3f v2{ radius * std::cos(a1), 0.0f, radius * std::sin(a1) };
+
+			// arrange vertices so that normal points outward (fix culling issue)
+			Vec3f e1 = apex - v0;
+			Vec3f e2 = v2 - v0;
+			Vec3f n = normalize(cross(e1, e2));
+
+			mesh.positions.push_back(v0);
+			mesh.positions.push_back(apex);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(n);
+			mesh.normals.push_back(n);
+			mesh.normals.push_back(n);
+		}
+
+		// bottom cap, normal -Y
+		for (int i = 0; i < segments; ++i)
+		{
+			float a0 = (float(i) / segments) * 2.0f * kPi;
+			float a1 = (float(i + 1) / segments) * 2.0f * kPi;
+
+			Vec3f c{ 0.0f, 0.0f, 0.0f };
+			Vec3f v1{ radius * std::cos(a0), 0.0f, radius * std::sin(a0) };
+			Vec3f v2{ radius * std::cos(a1), 0.0f, radius * std::sin(a1) };
+
+			mesh.positions.push_back(c);
+			mesh.positions.push_back(v1);
+			mesh.positions.push_back(v2);
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+			mesh.normals.push_back(Vec3f{ 0.0f, -1.0f, 0.0f });
+		}
+
+		return mesh;
+	}
+
+	void append_transformed_mesh(SimpleMeshData& dest, const SimpleMeshData& src, const Mat44f& transform)
+	{
+		Mat33f normalTransform = mat44_to_mat33(transpose(invert(transform)));
+
+		for (std::size_t i = 0; i < src.positions.size(); ++i)
+		{
+			Vec4f pos = transform * Vec4f{ src.positions[i].x, src.positions[i].y, src.positions[i].z, 1.0f };
+			dest.positions.push_back(Vec3f{ pos.x, pos.y, pos.z });
+
+			if (i < src.normals.size())
+			{
+				Vec3f normal = normalTransform * src.normals[i];
+				dest.normals.push_back(normalize(normal));
+			}
+		}
+	}
+
+	SimpleMeshData create_space_vehicle()
+	{
+		SimpleMeshData vehicle;
+
+		// sizes
+		float bodyRadius = 1.0f;
+		float bodyHeight = 4.0f;
+		float coneHeight = 2.0f;
+		float exhaustRad = 0.6f;
+		float exhaustH = 1.0f;
+
+		// Main body
+		SimpleMeshData body = create_cylinder(bodyRadius, bodyHeight, 32);
+		append_transformed_mesh(vehicle, body, kIdentity44f);
+
+		// Nose cone on top
+		SimpleMeshData nose = create_cone(bodyRadius, coneHeight, 32);
+		Mat44f noseXform = make_translation(Vec3f{ 0.0f, bodyHeight, 0.0f });
+		append_transformed_mesh(vehicle, nose, noseXform);
+
+		// Exhaust cylinder at bottom
+		SimpleMeshData exhaust = create_cylinder(exhaustRad, exhaustH, 32);
+		Mat44f exhaustXform = make_translation(Vec3f{ 0.0f, -exhaustH, 0.0f });
+		append_transformed_mesh(vehicle, exhaust, exhaustXform);
+
+		// Cockpit sphere inside body
+		SimpleMeshData cockpit = create_sphere(0.6f, 24, 16);
+		Mat44f cockpitXform = make_translation(Vec3f{ 0.0f, 2.3f, 0.6f });
+		append_transformed_mesh(vehicle, cockpit, cockpitXform);
+
+		// Three protruded box engines around the base 
+		for (int i = 0; i < 3; ++i)
+		{
+			float angle = (float(i) / 3.0f) * 2.0f * kPi;  
+
+			float finThickness = 0.2f;
+			float finHeight = 1.5f;
+			float finLength = 1.0f;
+
+			SimpleMeshData fin = create_box(finThickness, finHeight, finLength);
+
+			Mat44f finTranslate = make_translation(
+				Vec3f{ bodyRadius + finThickness * 0.5f, finHeight * 0.5f, 0.0f }
+			);
+
+			Mat44f finLocalRotate = make_rotation_y(kPi * 0.5f);
+
+			Mat44f finRotateAroundRocket = make_rotation_y(angle);
+
+			Mat44f finXform = finRotateAroundRocket * finTranslate * finLocalRotate;
+
+			append_transformed_mesh(vehicle, fin, finXform);
+		}
+
+		return vehicle;
+	}
 
 int main() try
 {
@@ -269,7 +698,7 @@ int main() try
 	glfwWindowHint( GLFW_SRGB_CAPABLE, GLFW_TRUE );
 	glfwWindowHint( GLFW_DOUBLEBUFFER, GLFW_TRUE );
 
-	//glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
+	//glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE )
 
 	glfwWindowHint( GLFW_CONTEXT_VERSION_MAJOR, 4 );
 	glfwWindowHint( GLFW_CONTEXT_VERSION_MINOR, 3 );
@@ -335,7 +764,8 @@ int main() try
 	// OPENGL State Setup
 	glEnable(GL_FRAMEBUFFER_SRGB);   
 	glEnable(GL_DEPTH_TEST);         
-	glEnable(GL_CULL_FACE);          
+	glEnable(GL_CULL_FACE);    
+	// glDisable(GL_CULL_FACE);
 	glClearColor(0.2f, 0.2f, 0.2f, 1.0f); 
 
 	OGL_CHECKPOINT_ALWAYS();
@@ -350,14 +780,21 @@ int main() try
 	glViewport( 0, 0, iwidth, iheight );
 
 	// Other initialization & loading
-
-	// Load shader program
-	ShaderProgram prog({
+	
+	// Load shader programs
+	ShaderProgram progDefault({
 		{ GL_VERTEX_SHADER, "assets/cw2/default.vert" },
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
 	});
-	state.prog = &prog;
-	state.camControl.position = Vec3f{0.f,100.f,0.f }; 
+	state.progTex = &progDefault;
+
+	ShaderProgram progPads({
+		{GL_VERTEX_SHADER, "assets/cw2/material.vert"},
+		{GL_FRAGMENT_SHADER, "assets/cw2/material.frag"}
+	});
+	state.progMat = &progPads;
+
+	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
 	state.camControl.theta = -0.5f; 
 
 	// Animation state
@@ -374,10 +811,19 @@ int main() try
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
 	// Load landing_pad mesh and create VAO
-	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj");
+	std::vector<Vec3f> padColors;
+	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj", &padColors);
 	std::print("Loaded landing_pad mesh: {} vertices, {} texcoords\n", padMesh.positions.size(), padMesh.texcoords.size());
 	GLuint padVAO = create_vao(padMesh);
 	std::size_t padVertexCount = padMesh.positions.size();
+
+	// Create space vehicle mesh and create VAO
+	SimpleMeshData vehicleMesh = create_space_vehicle();
+	std::print("Created space vehicle: {} vertices\n", vehicleMesh.positions.size());
+	GLuint vehicleVAO = create_vao(vehicleMesh);
+	std::size_t vehicleVertexCount = vehicleMesh.positions.size();
+
+	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f }; // Temporary position
 
 	// Load texture
 	GLuint texture = loadTexture("assets/cw2/L4343A-4k.jpeg");
@@ -473,11 +919,44 @@ int main() try
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glUseProgram(prog.programId());
-		drawTerrain(projection, camera_view, prog.programId(),
+		Mat44f padModel = kIdentity44f;
+
+		drawTerrain(projection, camera_view, progDefault.programId(),
 			lightDir, texture,
 			terrainVAO, terrainVertexCount
 		);
+		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
+		drawLandingPad(projection, camera_view, progPads.programId(),
+			lightDir, padModel, padColors,
+			padVAO, padVertexCount
+		);
+		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
+		drawLandingPad(projection, camera_view, progPads.programId(),
+			lightDir, padModel, padColors,
+			padVAO, padVertexCount
+		);
+
+		// Draw Space Vehicle
+
+		Mat44f vehicleModel = make_translation(vehiclePosition) * make_scaling(0.5f, 0.5f, 0.5f) * make_rotation_y(kPi);
+		Mat44f vehicleMVP = projection * camera_view * vehicleModel;
+		Mat33f vehicleNormalMatrix = mat44_to_mat33(transpose(invert(vehicleModel)));
+
+		glUseProgram(progDefault.programId());
+		glUniformMatrix4fv(0, 1, GL_TRUE, vehicleMVP.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, vehicleNormalMatrix.v);
+		glUniform3fv(2, 1, &lightDir.x);
+		glUniform3f(3, 0.9f, 0.9f, 0.6f);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		glUniform1i(glGetUniformLocation(progDefault.programId(), "uTexture"), 0);
+
+		glBindVertexArray(vehicleVAO);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vehicleVertexCount));
+		glBindVertexArray(0);
+
 
 		glUseProgram(0);
 
