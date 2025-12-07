@@ -89,7 +89,12 @@ namespace
 		std::vector<float> materialIds;
 	};
 
-	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Vec3f>* materialColors = nullptr)
+	struct Material {
+		Vec3f diffuse;
+		float shine;
+	};
+
+	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Material>* materials = nullptr)
 	{
 		auto result = rapidobj::ParseFile(path);
 		if (result.error)
@@ -100,13 +105,14 @@ namespace
 		SimpleMeshData ret;
 
 		// only if required
-		if (materialColors)
+		if (materials)
 		{
-			materialColors->resize(result.materials.size());
+			materials->resize(result.materials.size());
 			for (size_t i = 0; i < result.materials.size(); ++i)
 			{
 				auto const& mat = result.materials[i];
-				(*materialColors)[i] = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+				(*materials)[i].diffuse = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+				(*materials)[i].shine = float(mat.shininess);
 			}
 		}
 
@@ -143,7 +149,7 @@ namespace
 				}
 
 				// Materials
-				if (materialColors)
+				if (materials)
 				{
 					int faceIndex = int(i / 3);
 					int matId = shape.mesh.material_ids[faceIndex];
@@ -293,7 +299,7 @@ namespace
 		GLuint programId,
 		Vec3f const& lightDir,
 		Mat44f const& model,
-		std::vector<Vec3f> const& colors,
+		std::vector<Material> const& materials,
 		GLuint vao,
 		std::size_t vertexCount
 	)
@@ -309,12 +315,18 @@ namespace
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 
 		// Pass material colors
-		for (size_t i = 0; i < colors.size(); ++i)
+		GLint loc;
+		std::string name;
+		for (size_t i = 0; i < materials.size(); ++i)
 		{
-			std::string name = "uMaterialDiffuse[" + std::to_string(i) + "]";
-			GLint loc = glGetUniformLocation(programId, name.c_str());
-			if (loc >= 0)
-				glUniform3fv(loc, 1, &colors[i].x);
+
+			name = "uMaterialDiffuse[" + std::to_string(i) + "]";
+			loc = glGetUniformLocation(programId, name.c_str());
+			glUniform3fv(loc, 1, &materials[i].diffuse.x);
+
+			name = "uMaterialShine[" + std::to_string(i) + "]";
+			loc = glGetUniformLocation(programId, name.c_str());
+			glUniform1f(loc, materials[i].shine);
 		}
 
 		glBindVertexArray(vao);
@@ -811,8 +823,8 @@ int main() try
 	std::size_t terrainVertexCount = terrainMesh.positions.size();
 
 	// Load landing_pad mesh and create VAO
-	std::vector<Vec3f> padColors;
-	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj", &padColors);
+	std::vector<Material> padMaterials;
+	SimpleMeshData padMesh = load_wavefront_obj("assets/cw2/landingpad.obj", &padMaterials);
 	std::print("Loaded landing_pad mesh: {} vertices, {} texcoords\n", padMesh.positions.size(), padMesh.texcoords.size());
 	GLuint padVAO = create_vao(padMesh);
 	std::size_t padVertexCount = padMesh.positions.size();
@@ -927,12 +939,12 @@ int main() try
 		);
 		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
-			lightDir, padModel, padColors,
+			lightDir, padModel, padMaterials,
 			padVAO, padVertexCount
 		);
 		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
-			lightDir, padModel, padColors,
+			lightDir, padModel, padMaterials,
 			padVAO, padVertexCount
 		);
 
