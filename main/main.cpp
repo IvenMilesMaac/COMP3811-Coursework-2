@@ -63,6 +63,14 @@ namespace
 
 			Vec3f position;
 		} camControl;
+
+		struct Animation_
+		{
+			bool isActive;
+			bool isPlaying;
+			float time;
+			Vec3f startPosition;
+		}animation;
 	};
 
 	void glfw_callback_error_(int, char const*);
@@ -677,6 +685,40 @@ namespace
 		}
 
 		return vehicle;
+	}
+
+	struct AnimationState
+	{
+		Vec3f position;
+		Vec3f direction;
+	};
+
+	AnimationState compute_vehicle_animation(float t, Vec3f const& startPos)
+	{
+		float radius = 15.0f;
+		float height = 5.0f;
+		float angularSpeed = 0.4f;
+		float angle = angularSpeed * t;
+
+		Vec3f center = startPos;
+
+		Vec3f pos{
+			center.x + radius * std::cos(angle),
+			center.y + height,
+			center.z + radius * std::sin(angle)
+		};
+
+		Vec3f dir{
+			-radius * std::sin(angle),
+			0.0f,
+			radius * std::cos(angle)
+		};
+		dir = normalize(dir);
+
+		AnimationState st;
+		st.position = pos;
+		st.direction = dir;
+		return st;
 	}
 }
 
