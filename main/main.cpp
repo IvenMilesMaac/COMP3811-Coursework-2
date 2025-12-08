@@ -856,12 +856,11 @@ int main() try
 	state.camControl.theta = -0.5f; 
 
 	// Initialize light sources
-	Vec3f lightColor = Vec3f{ 0.9f, 0.9f, 0.6f };
 	float intensityMultiplier = 10;
-	globalLight  = { Vec3f{0.1f, 1.f, -1.f}, lightColor, true };
-	pointLights[0] = { Vec3f{-50.f, 30.f, -30.f}, intensityMultiplier * lightColor, true };
-	pointLights[1] = { Vec3f{50.f, 30.f, -30.f}, intensityMultiplier * lightColor, true };
-	pointLights[2] = { Vec3f{0.f, 30.f, 20.f}, intensityMultiplier * lightColor, true };
+	globalLight  = { Vec3f{0.1f, 1.f, -1.f}, Vec3f{ 0.9f, 0.9f, 0.6f }, true };
+	pointLights[0] = { Vec3f{-50.f, 30.f, -30.f}, intensityMultiplier * Vec3f{0.f, 1.f, 1.f}, true };
+	pointLights[1] = { Vec3f{50.f, 30.f, -30.f}, intensityMultiplier * Vec3f{1.f, 1.f, 0.2f}, true };
+	pointLights[2] = { Vec3f{0.f, 30.f, 20.f}, intensityMultiplier * Vec3f{1.f, 0.f, 1.f}, true };
 
 	// Animation state
 	auto last = Clock::now();
