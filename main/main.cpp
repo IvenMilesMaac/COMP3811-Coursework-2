@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 // Imports
+#include <algorithm>
 #include <vector> 
 #include <rapidobj/rapidobj.hpp> 
 #include "../vmlib/vec2.hpp"
@@ -63,12 +64,20 @@ namespace
 
 			Vec3f position;
 		} camControl;
+
+		struct Animation_
+		{
+			bool isActive;
+			bool isPlaying;
+			float time;
+			Vec3f startPosition;
+		}animation;
 	};
-	
-	void glfw_callback_error_( int, char const* );
+
+	void glfw_callback_error_(int, char const*);
 
 	void glfw_callback_mouse_button_(GLFWwindow*, int, int, int);
-	void glfw_callback_key_( GLFWwindow*, int, int, int, int );
+	void glfw_callback_key_(GLFWwindow*, int, int, int, int);
 	void glfw_callback_motion_(GLFWwindow*, double, double);
 
 	struct GLFWCleanupHelper
@@ -106,7 +115,7 @@ namespace
 			for (size_t i = 0; i < result.materials.size(); ++i)
 			{
 				auto const& mat = result.materials[i];
-				(*materialColors)[i] = Vec3f{mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]};
+				(*materialColors)[i] = Vec3f{ mat.diffuse[0], mat.diffuse[1], mat.diffuse[2] };
 			}
 		}
 
@@ -258,8 +267,8 @@ namespace
 
 	void drawTerrain(
 		Mat44f const& projection,
-		Mat44f const& camera_view, 
-		GLuint programId, 
+		Mat44f const& camera_view,
+		GLuint programId,
 		Vec3f const& lightDir,
 		GLuint texture,
 		GLuint vao,
@@ -321,7 +330,6 @@ namespace
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
 	}
-}
 
 	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
 	{
@@ -557,6 +565,7 @@ namespace
 		return mesh;
 	}
 
+
 	SimpleMeshData create_cone(float radius = 0.5f, float height = 1.0f, int segments = 32)
 	{
 		SimpleMeshData mesh;
@@ -655,7 +664,7 @@ namespace
 		// Three protruded box engines around the base 
 		for (int i = 0; i < 3; ++i)
 		{
-			float angle = (float(i) / 3.0f) * 2.0f * kPi;  
+			float angle = (float(i) / 3.0f) * 2.0f * kPi;
 
 			float finThickness = 0.2f;
 			float finHeight = 1.5f;
@@ -678,6 +687,74 @@ namespace
 
 		return vehicle;
 	}
+
+	struct AnimationState
+	{
+		Vec3f position;
+		Vec3f direction;
+		float speed;
+	};
+
+	AnimationState compute_vehicle_animation(float t, Vec3f const& startPos)
+	{
+		AnimationState result{};
+
+		// Normalize time
+		float flightDuration = 12.0f; 
+		float u = t / flightDuration;
+
+		if (u < 0.0f) u = 0.0f;
+		if (u > 1.0f) u = 1.0f;
+
+		// Smooth Step
+		float s = u * u * (3.0f - 2.0f * u);
+
+		// Define Key Positions
+		Vec3f p0 = startPos; // Start (Pad 1)
+		Vec3f p3 = Vec3f{ 20.0f, -0.97f, -50.0f }; // End (Pad 2)
+
+		// Control points
+		float arcHeight = 40.0f;
+		Vec3f p1 = p0 + Vec3f{ 0.0f, arcHeight, 0.0f };
+		Vec3f p2 = p3 + Vec3f{ 0.0f, arcHeight, 0.0f };
+
+		// Bezier Curve Calculation
+
+		auto lerp = [](Vec3f const& a, Vec3f const& b, float t) -> Vec3f
+			{
+				return a + t * (b - a);
+			};
+
+		// Layer 1
+		Vec3f A = lerp(p0, p1, s);
+		Vec3f B = lerp(p1, p2, s);
+		Vec3f C = lerp(p2, p3, s);
+
+		// Layer 2
+		Vec3f D = lerp(A, B, s);
+		Vec3f E = lerp(B, C, s);
+
+		// Layer 3 
+		result.position = lerp(D, E, s);
+
+		// Direction
+		Vec3f tangent = E - D;
+
+		if (length(tangent) > 0.001f)
+		{
+			result.direction = normalize(tangent);
+		}
+		else
+		{
+			result.direction = Vec3f{ 0.0f, 1.0f, 0.0f };
+		}
+
+		result.speed = 30.0f * (s * (1.0f - s)) * 4.0f; 
+
+		return result;
+	}
+
+}
 
 int main() try
 {
@@ -798,6 +875,13 @@ int main() try
 	state.camControl.theta = -0.5f; 
 
 	// Animation state
+	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f };
+
+	state.animation.isActive = false;
+	state.animation.isPlaying = false;
+	state.animation.time = 0.0f;
+	state.animation.startPosition = vehiclePosition;
+
 	auto last = Clock::now();
 
 	float angle = 0.f;
@@ -822,8 +906,6 @@ int main() try
 	std::print("Created space vehicle: {} vertices\n", vehicleMesh.positions.size());
 	GLuint vehicleVAO = create_vao(vehicleMesh);
 	std::size_t vehicleVertexCount = vehicleMesh.positions.size();
-
-	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f }; // Temporary position
 
 	// Load texture
 	GLuint texture = loadTexture("assets/cw2/L4343A-4k.jpeg");
@@ -905,6 +987,52 @@ int main() try
 		if (cam.actionDown)
 			cam.position -= dtSpeed * up;
 
+		auto& anim = state.animation;
+		if (anim.isActive && anim.isPlaying)
+		{
+			anim.time += dt;
+		}
+
+		Vec3f currentVehiclePos;
+		Mat44f vehicleModel;
+
+		if (anim.isActive)
+		{
+			AnimationState animState = compute_vehicle_animation(anim.time, anim.startPosition);
+			currentVehiclePos = animState.position;
+
+			Vec3f dir = normalize(animState.direction);
+			Vec3f worldUp{ 0.0f, 1.0f, 0.0f };
+
+			if (std::abs(dot(dir, worldUp)) > 0.99f)
+			{
+				worldUp = Vec3f{ 1.0f, 0.0f, 0.0f };
+			}
+
+			Vec3f yAxis = dir;
+			Vec3f zAxis = normalize(cross(yAxis, worldUp));
+			Vec3f xAxis = normalize(cross(zAxis, yAxis));
+
+			Mat44f rotation{
+				xAxis.x, yAxis.x, zAxis.x, 0.0f,
+				xAxis.y, yAxis.y, zAxis.y, 0.0f,
+				xAxis.z, yAxis.z, zAxis.z, 0.0f,
+				0.0f,    0.0f,    0.0f,    1.0f
+			};
+
+			vehicleModel = make_translation(currentVehiclePos)
+				* rotation
+				* make_scaling(0.5f, 0.5f, 0.5f);
+		}
+		else
+		{
+			currentVehiclePos = vehiclePosition;
+			vehicleModel = make_translation(vehiclePosition)
+				* make_scaling(0.5f, 0.5f, 0.5f)
+				* make_rotation_y(kPi);
+		}
+
+
 		// Draw scene
 		OGL_CHECKPOINT_DEBUG();
 
@@ -938,7 +1066,7 @@ int main() try
 
 		// Draw Space Vehicle
 
-		Mat44f vehicleModel = make_translation(vehiclePosition) * make_scaling(0.5f, 0.5f, 0.5f) * make_rotation_y(kPi);
+		// Mat44f vehicleModel = make_translation(vehiclePosition) * make_scaling(0.5f, 0.5f, 0.5f) * make_rotation_y(kPi);
 		Mat44f vehicleMVP = projection * camera_view * vehicleModel;
 		Mat33f vehicleNormalMatrix = mat44_to_mat33(transpose(invert(vehicleModel)));
 
@@ -953,10 +1081,13 @@ int main() try
 		glBindTexture(GL_TEXTURE_2D, texture);
 		glUniform1i(glGetUniformLocation(progDefault.programId(), "uTexture"), 0);
 
+		glDisable(GL_CULL_FACE);
+
 		glBindVertexArray(vehicleVAO);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vehicleVertexCount));
 		glBindVertexArray(0);
 
+		glEnable(GL_CULL_FACE);
 
 		glUseProgram(0);
 
@@ -1071,6 +1202,26 @@ namespace
 					state->camControl.actionSlowDown = true;
 				else if (GLFW_RELEASE == aAction)
 					state->camControl.actionSlowDown = false;
+			}
+			// animation controls
+			if (GLFW_KEY_F == aKey && GLFW_PRESS == aAction)
+			{
+				if (!state->animation.isActive)
+				{
+					state->animation.isActive = true;
+					state->animation.isPlaying = true;
+					state->animation.time = 0.0f;
+				}
+				else
+				{
+					state->animation.isPlaying = !state->animation.isPlaying;
+				}
+			}
+			else if (GLFW_KEY_R == aKey && GLFW_PRESS == aAction)
+			{
+				state->animation.isActive = false;
+				state->animation.isPlaying = false;
+				state->animation.time = 0.0f;
 			}
 		}
 	}
