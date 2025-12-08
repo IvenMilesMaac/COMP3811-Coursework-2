@@ -68,7 +68,7 @@ void main()
 			vec3 specular = spec * uPointLights[i].color;
 
 			// Attenuation
-			float attenuation = 1.0/ (dist * dist);
+			float attenuation = 1.0 / (1.0 + 0.02 * dist * dist);
 
 			lighting += (pDiffuse + specular) * attenuation;
 		}

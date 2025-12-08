@@ -838,7 +838,7 @@ int main() try
 
 	// Other initialization & loading
 	
-	// Load shader programs
+	// Load shader programsdddddd
 	ShaderProgram progDefault({
 		{ GL_VERTEX_SHADER, "assets/cw2/default.vert" },
 		{ GL_FRAGMENT_SHADER, "assets/cw2/default.frag" }
@@ -856,11 +856,11 @@ int main() try
 	state.camControl.theta = -0.5f; 
 
 	// Initialize light sources
-	float intensityMultiplier = 10;
+	float intensityMultiplier = 1;
 	globalLight  = { Vec3f{0.1f, 1.f, -1.f}, Vec3f{ 0.9f, 0.9f, 0.6f }, true };
-	pointLights[0] = { Vec3f{-50.f, 30.f, -30.f}, intensityMultiplier * Vec3f{0.f, 1.f, 1.f}, true };
-	pointLights[1] = { Vec3f{50.f, 30.f, -30.f}, intensityMultiplier * Vec3f{1.f, 1.f, 0.2f}, true };
-	pointLights[2] = { Vec3f{0.f, 30.f, 20.f}, intensityMultiplier * Vec3f{1.f, 0.f, 1.f}, true };
+	pointLights[0] = { Vec3f{0.f, 30.f, 35.f}, intensityMultiplier * Vec3f{0.f, 1.f, 1.f}, true };
+	pointLights[1] = { Vec3f{10.f, 30.f, 55.f}, intensityMultiplier * Vec3f{1.f, 1.f, 0.2f}, true };
+	pointLights[2] = { Vec3f{20.f, 30.f, 35.f}, intensityMultiplier * Vec3f{1.f, 0.f, 1.f}, true };
 
 	// Animation state
 	auto last = Clock::now();
@@ -888,7 +888,7 @@ int main() try
 	GLuint vehicleVAO = create_vao(vehicleMesh);
 	std::size_t vehicleVertexCount = vehicleMesh.positions.size();
 
-	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f }; // Temporary position
+	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f };
 
 	// Load texture
 	GLuint texture = loadTexture("assets/cw2/L4343A-4k.jpeg");
