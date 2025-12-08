@@ -937,12 +937,8 @@ int main() try
 	});
 	state.progMat = &progPads;
 
-<<<<<<< HEAD
-	state.camControl.phi = 0.0f;
-=======
 	// Initialize camera
-	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
->>>>>>> main
+	state.camControl.phi = 0.0f;
 	state.camControl.theta = -0.5f; 
 
 	// Initialize light sources
