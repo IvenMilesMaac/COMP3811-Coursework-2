@@ -1048,7 +1048,7 @@ int main() try
 		// Draw scene
 		OGL_CHECKPOINT_DEBUG();
 
-		// Compute matrices
+		// Camera setup
 		Mat44f camera_view;
 
 		Vec3f camPosFinal;
@@ -1061,17 +1061,17 @@ int main() try
 
 		case CameraMode::Free:
 		{
-			// Standard WASD controls (Your existing logic)
+			// Standard WASD controls
 			camPosFinal = cam.position;
-			camForwardFinal = forward; // computed earlier in your loop
-			camUpFinal = up;           // computed earlier in your loop
-			camRightFinal = right;     // computed earlier in your loop
+			camForwardFinal = forward; 
+			camUpFinal = up;           
+			camRightFinal = right;     
 			break;
 		}
 
 		case CameraMode::Chase:
 		{
-			// If animation is not active, behave like Free camera
+			// If animation is not active disable chase mode
 			if (!state.animation.isActive)
 			{
 				camPosFinal = cam.position;
@@ -1083,7 +1083,7 @@ int main() try
 
 			// Normal chase mode when animation is active
 			Vec3f target = currentVehiclePos;
-			Vec3f vehicleDir = Vec3f{ 0.f, 1.f, 0.f }; // default, will be overwritten
+			Vec3f vehicleDir = Vec3f{ 0.f, 1.f, 0.f }; 
 
 			AnimationState as = compute_vehicle_animation(state.animation.time,
 				state.animation.startPosition);
@@ -1100,13 +1100,11 @@ int main() try
 
 		case CameraMode::Ground:
 		{
-			// Logic: Fixed spot on the terrain, rotating to face the rocket
-			// Chosen spot: Offset slightly from the launchpad (approx 10, -0.97, 45)
+			// FFixed spot on terrain looking at rocket
 			camPosFinal = Vec3f{ 10.0f, 2.0f, 70.0f };
 
 			Vec3f target = currentVehiclePos;
 
-			// Look at the rocket
 			camForwardFinal = normalize(target - camPosFinal);
 			camRightFinal = normalize(cross(camForwardFinal, Vec3f{ 0.f, 1.f, 0.f }));
 			camUpFinal = normalize(cross(camRightFinal, camForwardFinal));
@@ -1114,7 +1112,6 @@ int main() try
 		}
 	}
 
-		// Final view matrix construction
 		camera_view = construct_camera_view(camForwardFinal, camUpFinal, camRightFinal, camPosFinal);
 
 		Mat44f projection = make_perspective_projection(
