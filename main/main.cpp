@@ -98,7 +98,13 @@ namespace
 		Vec3f direction;
 		Vec3f color;
 		bool enabled;
-	};
+	} globalLight;
+
+	struct PointLight {
+		Vec3f position;
+		Vec3f color;
+		bool enabled;
+	} pointLights[3];
 
 	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Material>* materials = nullptr)
 	{
@@ -267,25 +273,43 @@ namespace
 		return textureID;
 	}
 
-	void setGlobalLight(GLuint programId, DirectionalLight const& light)
+	void setLighting(GLuint programId, DirectionalLight const& globalLight, PointLight const* pointLights)
 	{
+		// Global Directional Light
 		GLint locDir = glGetUniformLocation(programId, "uGlobalLight.direction");
 		GLint locColor = glGetUniformLocation(programId, "uGlobalLight.color");
 		GLint locEnabled = glGetUniformLocation(programId, "uGlobalLight.enabled");
 
-		glUniform3fv(locDir, 1, &light.direction.x);
-		glUniform3fv(locColor, 1, &light.color.x);
-		glUniform1i(locEnabled, light.enabled);
+		glUniform3fv(locDir, 1, &globalLight.direction.x);
+		glUniform3fv(locColor, 1, &globalLight.color.x);
+		glUniform1i(locEnabled, globalLight.enabled);
+
+		// 3 Local Point Lights
+		std::string base;
+		GLint locPos;
+		for (std::size_t i = 0; i < 3; ++i)
+		{
+			base = "uPointLights[" + std::to_string(i) + "].";
+			locPos = glGetUniformLocation(programId, (base + "position").c_str());
+			locColor = glGetUniformLocation(programId, (base + "color").c_str());
+			locEnabled = glGetUniformLocation(programId, (base + "enabled").c_str());
+
+			glUniform3fv(locPos, 1, &pointLights[i].position.x);
+			glUniform3fv(locColor, 1, &pointLights[i].color.x);
+			glUniform1i(locEnabled, pointLights[i].enabled);
+		}
 	}
 
 	void drawTerrain(
 		Mat44f const& projection,
-		Mat44f const& camera_view, 
-		GLuint programId, 
+		Mat44f const& camera_view,
+		GLuint programId,
 		GLuint texture,
 		GLuint vao,
 		std::size_t vertexCount,
-		DirectionalLight const& light
+		DirectionalLight const& globalLight,
+		PointLight const* pointLights,
+		Vec3f const& cameraPos
 	)
 	{
 		Mat44f model = kIdentity44f;
@@ -293,11 +317,13 @@ namespace
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
-		setGlobalLight(programId, light);
+		setLighting(programId, globalLight, pointLights);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		glUniformMatrix4fv(2, 1, GL_TRUE, model.v);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 		glUniform1i(5, true);
+		glUniform3f(6, cameraPos.x, cameraPos.y, cameraPos.z);
 
 		// Bind texture to texture unit0 and set sampler uniform
 		glActiveTexture(GL_TEXTURE0);
@@ -317,17 +343,20 @@ namespace
 		std::vector<Material> const& materials,
 		GLuint vao,
 		std::size_t vertexCount,
-		DirectionalLight const& light
+		DirectionalLight const& globalLight,
+		PointLight const* pointLights,
+		Vec3f const& cameraPos
 	)
 	{
 		Mat44f mvp = projection * camera_view * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
-		setGlobalLight(programId, light);
+		setLighting(programId, globalLight, pointLights);
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+		glUniform3f(6, cameraPos.x, cameraPos.y, cameraPos.z);
 
 		// Pass material colors
 		GLint loc;
@@ -338,9 +367,9 @@ namespace
 			loc = glGetUniformLocation(programId, name.c_str());
 			glUniform3fv(loc, 1, &materials[i].diffuse.x);
 
-			/*name = "uMaterialShine[" + std::to_string(i) + "]";
+			name = "uMaterialShine[" + std::to_string(i) + "]";
 			loc = glGetUniformLocation(programId, name.c_str());
-			glUniform1f(loc, materials[i].shine);*/
+			glUniform1f(loc, materials[i].shine);
 		}
 
 		glBindVertexArray(vao);
@@ -826,12 +855,13 @@ int main() try
 	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
 	state.camControl.theta = -0.5f; 
 
-	// Initialize global light source
-	DirectionalLight globalLight{
-		Vec3f{0.1f, 1.f, -1.f},
-		Vec3f{0.9f, 0.9f, 0.6f},
-		true
-	};
+	// Initialize light sources
+	Vec3f lightColor = Vec3f{ 0.9f, 0.9f, 0.6f };
+	float intensityMultiplier = 10;
+	globalLight  = { Vec3f{0.1f, 1.f, -1.f}, lightColor, true };
+	pointLights[0] = { Vec3f{-50.f, 30.f, -30.f}, intensityMultiplier * lightColor, true };
+	pointLights[1] = { Vec3f{50.f, 30.f, -30.f}, intensityMultiplier * lightColor, true };
+	pointLights[2] = { Vec3f{0.f, 30.f, 20.f}, intensityMultiplier * lightColor, true };
 
 	// Animation state
 	auto last = Clock::now();
@@ -958,17 +988,17 @@ int main() try
 		Mat44f padModel = kIdentity44f;
 
 		drawTerrain(projection, camera_view, progDefault.programId(),
-			texture, terrainVAO, terrainVertexCount, globalLight
+			texture, terrainVAO, terrainVertexCount, globalLight, pointLights, cam.position
 		);
 		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
 			padModel, padMaterials,
-			padVAO, padVertexCount, globalLight
+			padVAO, padVertexCount, globalLight, pointLights, cam.position
 		);
 		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
 		drawLandingPad(projection, camera_view, progPads.programId(),
 			padModel, padMaterials,
-			padVAO, padVertexCount, globalLight
+			padVAO, padVertexCount, globalLight, pointLights, cam.position
 		);
 
 		// Draw Space Vehicle
@@ -980,7 +1010,7 @@ int main() try
 		glUseProgram(progDefault.programId());
 		glUniformMatrix4fv(0, 1, GL_TRUE, vehicleMVP.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, vehicleNormalMatrix.v);
-		setGlobalLight(progDefault.programId(), globalLight);
+		setLighting(progDefault.programId(), globalLight, pointLights);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 		glUniform1i(5, false);
 
@@ -1107,6 +1137,18 @@ namespace
 				else if (GLFW_RELEASE == aAction)
 					state->camControl.actionSlowDown = false;
 			}
+		}
+
+		if (GLFW_PRESS == aAction)
+		{
+			if (GLFW_KEY_1 == aKey)
+				pointLights[0].enabled = !pointLights[0].enabled;
+			else if (GLFW_KEY_2 == aKey)
+				pointLights[1].enabled = !pointLights[1].enabled;
+			else if (GLFW_KEY_3 == aKey)
+				pointLights[2].enabled = !pointLights[2].enabled;
+			else if (GLFW_KEY_4 == aKey)
+				globalLight.enabled = !globalLight.enabled;
 		}
 	}
 
