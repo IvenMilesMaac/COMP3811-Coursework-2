@@ -39,6 +39,13 @@ namespace
 	constexpr float kMovementSpeed = 5.f;
 	constexpr float kMouseSens = 0.01f;
 
+	enum class CameraMode
+	{
+		Free = 0,
+		Chase = 1,
+		Ground = 2
+	};
+
 	struct State_
 	{
 		ShaderProgram* progTex;
@@ -72,6 +79,8 @@ namespace
 			float time;
 			Vec3f startPosition;
 		}animation;
+
+		CameraMode cameraMode;
 	};
 
 	void glfw_callback_error_(int, char const*);
@@ -866,6 +875,9 @@ int main() try
 	State_ state{};
 	glfwSetWindowUserPointer(window, &state);
 
+	// Initial Camera mode
+	state.cameraMode = CameraMode::Free;
+
 	glfwSetMouseButtonCallback(window, &glfw_callback_mouse_button_);
 	glfwSetKeyCallback( window, &glfw_callback_key_ );
 	glfwSetCursorPosCallback(window, &glfw_callback_motion_);
@@ -926,7 +938,7 @@ int main() try
 	state.progMat = &progPads;
 
 	// Initialize camera
-	state.camControl.position = Vec3f{0.f,3.f,0.f }; 
+	state.camControl.phi = 0.0f;
 	state.camControl.theta = -0.5f; 
 
 	// Initialize light sources
@@ -1098,8 +1110,72 @@ int main() try
 		// Draw scene
 		OGL_CHECKPOINT_DEBUG();
 
-		// Compute matrices
-		Mat44f camera_view = construct_camera_view(forward, up, right, cam.position);
+		// Camera setup
+		Mat44f camera_view;
+
+		Vec3f camPosFinal;
+		Vec3f camForwardFinal;
+		Vec3f camUpFinal;
+		Vec3f camRightFinal;
+
+		switch (state.cameraMode)
+		{
+
+		case CameraMode::Free:
+		{
+			// Standard WASD controls
+			camPosFinal = cam.position;
+			camForwardFinal = forward; 
+			camUpFinal = up;           
+			camRightFinal = right;     
+			break;
+		}
+
+		case CameraMode::Chase:
+		{
+			// If animation is not active disable chase mode
+			if (!state.animation.isActive)
+			{
+				camPosFinal = cam.position;
+				camForwardFinal = forward;
+				camUpFinal = up;
+				camRightFinal = right;
+				break;
+			}
+
+			// Normal chase mode when animation is active
+			Vec3f target = currentVehiclePos;
+			Vec3f vehicleDir = Vec3f{ 0.f, 1.f, 0.f }; 
+
+			AnimationState as = compute_vehicle_animation(state.animation.time,
+				state.animation.startPosition);
+			if (length(as.direction) > 0.001f)
+				vehicleDir = normalize(as.direction);
+
+			camPosFinal = target - (vehicleDir * 20.0f) + Vec3f{ 0.0f, 5.0f, 0.0f };
+
+			camForwardFinal = normalize(target - camPosFinal);
+			camRightFinal = normalize(cross(camForwardFinal, Vec3f{ 0.f, 1.f, 0.f }));
+			camUpFinal = normalize(cross(camRightFinal, camForwardFinal));
+			break;
+		}
+
+		case CameraMode::Ground:
+		{
+			// FFixed spot on terrain looking at rocket
+			camPosFinal = Vec3f{ 10.0f, 2.0f, 70.0f };
+
+			Vec3f target = currentVehiclePos;
+
+			camForwardFinal = normalize(target - camPosFinal);
+			camRightFinal = normalize(cross(camForwardFinal, Vec3f{ 0.f, 1.f, 0.f }));
+			camUpFinal = normalize(cross(camRightFinal, camForwardFinal));
+			break;
+		}
+	}
+
+		camera_view = construct_camera_view(camForwardFinal, camUpFinal, camRightFinal, camPosFinal);
+
 		Mat44f projection = make_perspective_projection(
 			60.f * std::numbers::pi_v<float> / 180.f,
 			fbwidth / float(fbheight),
@@ -1283,6 +1359,14 @@ namespace
 				state->animation.isActive = false;
 				state->animation.isPlaying = false;
 				state->animation.time = 0.0f;
+			}
+
+			// Camera Control Toggle
+			if (GLFW_KEY_C == aKey && GLFW_PRESS == aAction)
+			{
+				int mode = static_cast<int>(state->cameraMode);
+				mode = (mode + 1) % 3;
+				state->cameraMode = static_cast<CameraMode>(mode);
 			}
 		}
 
