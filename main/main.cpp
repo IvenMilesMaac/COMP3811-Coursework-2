@@ -810,8 +810,6 @@ namespace
 		return result;
 	}
 
-}
-
 int main() try
 {
 	// Initialize GLFW
