@@ -74,5 +74,5 @@ void main()
 		}
 	}
 
-    outColor = vec4(lighting * 0.5, 1.0);
+    outColor = vec4(lighting, 1.0);
 }
