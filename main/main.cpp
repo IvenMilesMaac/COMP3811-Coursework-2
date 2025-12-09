@@ -124,6 +124,27 @@ namespace
 		bool enabled;
 	} pointLights[3];
 
+	// Common info required to draw an object
+	struct RenderContext {
+		Mat44f projection;
+		Mat44f cameraView;
+		Vec3f camPos;
+	};
+
+	// Data for terrain and vehicle
+	struct DefaultData {
+		GLuint vao;
+		std::size_t vertexCount;
+		GLuint texture;
+		Mat44f model;
+	};
+	// Data for pad
+	struct PadData {
+		GLuint vao;
+		std::size_t vertexCount;
+		std::vector<Material> materials;
+	};
+
 	SimpleMeshData load_wavefront_obj(char const* path, std::vector<Material>* materials = nullptr)
 	{
 		auto result = rapidobj::ParseFile(path);
@@ -319,19 +340,15 @@ namespace
 	}
 
 	void drawTerrain(
-		Mat44f const& projection,
-		Mat44f const& camera_view,
+		RenderContext const& ctx,
 		GLuint programId,
 		GLuint texture,
 		GLuint vao,
-		std::size_t vertexCount,
-		DirectionalLight const& globalLight,
-		PointLight const* pointLights,
-		Vec3f const& cameraPos
+		std::size_t vertexCount
 	)
 	{
 		Mat44f model = kIdentity44f;
-		Mat44f mvp = projection * camera_view * model;
+		Mat44f mvp = ctx.projection * ctx.cameraView * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
@@ -341,7 +358,7 @@ namespace
 		glUniformMatrix4fv(2, 1, GL_TRUE, model.v);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
 		glUniform1i(5, true);
-		glUniform3f(6, cameraPos.x, cameraPos.y, cameraPos.z);
+		glUniform3f(6, ctx.camPos.x, ctx.camPos.y, ctx.camPos.z);
 
 		// Bind texture to texture unit0 and set sampler uniform
 		glActiveTexture(GL_TEXTURE0);
@@ -354,19 +371,15 @@ namespace
 	}
 
 	void drawLandingPad(
-		Mat44f const& projection,
-		Mat44f const& camera_view,
+		RenderContext const& ctx,
 		GLuint programId,
 		Mat44f const& model,
 		std::vector<Material> const& materials,
 		GLuint vao,
-		std::size_t vertexCount,
-		DirectionalLight const& globalLight,
-		PointLight const* pointLights,
-		Vec3f const& cameraPos
+		std::size_t vertexCount
 	)
 	{
-		Mat44f mvp = projection * camera_view * model;
+		Mat44f mvp = ctx.projection * ctx.cameraView * model;
 		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
 
 		glUseProgram(programId);
@@ -374,7 +387,7 @@ namespace
 		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
 		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
 		glUniform3f(4, 0.05f, 0.05f, 0.05f);
-		glUniform3f(6, cameraPos.x, cameraPos.y, cameraPos.z);
+		glUniform3f(6, ctx.camPos.x, ctx.camPos.y, ctx.camPos.z);
 
 		// Pass material colors
 		GLint loc;
@@ -393,6 +406,53 @@ namespace
 		glBindVertexArray(vao);
 		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
 		glBindVertexArray(0);
+	}
+
+	void drawSpaceVehicle(
+		RenderContext const& ctx,
+		GLuint programId,
+		Mat44f const& model,
+		GLuint vao,
+		std::size_t vertexCount
+	)
+	{
+		Mat44f mvp = ctx.projection * ctx.cameraView * model;
+		Mat33f normalMatrix = mat44_to_mat33(transpose(invert(model)));
+
+		glUseProgram(programId);
+		glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+		glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+		setLighting(programId, globalLight, pointLights);
+		glUniform3f(4, 0.05f, 0.05f, 0.05f);
+		glUniform1i(5, false);
+
+		glDisable(GL_CULL_FACE);
+
+		glBindVertexArray(vao);
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vertexCount));
+		glBindVertexArray(0);
+	}
+
+	void drawScene(
+		RenderContext const& ctx,
+		DefaultData const& terrain,
+		PadData const& pad,
+		DefaultData const& vehicle,
+		GLuint const& defaultProgId,
+		GLuint const& padProgId
+	)
+	{
+		Mat44f padModel;
+
+		drawTerrain(ctx, defaultProgId, terrain.texture, terrain.vao, terrain.vertexCount);
+
+		padModel = make_translation(Vec3f{ 10.f, -0.97f, 45.f });
+		drawLandingPad(ctx, padProgId, padModel, pad.materials, pad.vao, pad.vertexCount);
+
+		padModel = make_translation(Vec3f{ 20.f, -0.97f, -50.f });
+		drawLandingPad(ctx, padProgId, padModel, pad.materials, pad.vao, pad.vertexCount);
+
+		drawSpaceVehicle(ctx, defaultProgId, vehicle.model, vehicle.vao, vehicle.vertexCount);
 	}
 
 	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
@@ -1172,7 +1232,7 @@ int main() try
 			camUpFinal = normalize(cross(camRightFinal, camForwardFinal));
 			break;
 		}
-	}
+		}
 
 		camera_view = construct_camera_view(camForwardFinal, camUpFinal, camRightFinal, camPosFinal);
 
@@ -1181,48 +1241,20 @@ int main() try
 			fbwidth / float(fbheight),
 			0.1f, 1000.0f
 		);
-		Vec3f lightDir = normalize(Vec3f{0.f,1.f, -1.f });
 		
 		// Clear and draw frame
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		Mat44f padModel = kIdentity44f;
-
-		drawTerrain(projection, camera_view, progDefault.programId(),
-			texture, terrainVAO, terrainVertexCount, globalLight, pointLights, cam.position
-		);
-		padModel = make_translation(Vec3f{10.f, -0.97f, 45.f});
-		drawLandingPad(projection, camera_view, progPads.programId(),
-			padModel, padMaterials,
-			padVAO, padVertexCount, globalLight, pointLights, cam.position
-		);
-		padModel = make_translation(Vec3f{20.f, -0.97f, -50.f});
-		drawLandingPad(projection, camera_view, progPads.programId(),
-			padModel, padMaterials,
-			padVAO, padVertexCount, globalLight, pointLights, cam.position
-		);
-
-		// Draw Space Vehicle
-
-		// Mat44f vehicleModel = make_translation(vehiclePosition) * make_scaling(0.5f, 0.5f, 0.5f) * make_rotation_y(kPi);
-		Mat44f vehicleMVP = projection * camera_view * vehicleModel;
-		Mat33f vehicleNormalMatrix = mat44_to_mat33(transpose(invert(vehicleModel)));
-
-		glUseProgram(progDefault.programId());
-		glUniformMatrix4fv(0, 1, GL_TRUE, vehicleMVP.v);
-		glUniformMatrix3fv(1, 1, GL_TRUE, vehicleNormalMatrix.v);
-		setLighting(progDefault.programId(), globalLight, pointLights);
-		glUniform3f(4, 0.05f, 0.05f, 0.05f);
-		glUniform1i(5, false);
-
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texture);
-		glUniform1i(glGetUniformLocation(progDefault.programId(), "uTexture"), 0);
-
-		glDisable(GL_CULL_FACE);
-
-		glBindVertexArray(vehicleVAO);
-		glDrawArrays(GL_TRIANGLES, 0, GLsizei(vehicleVertexCount));
-		glBindVertexArray(0);
+		RenderContext baseContext = {
+			projection, 
+			camera_view,
+			cam.position
+		};
+		Mat44f padModel;
+		DefaultData terrain = {terrainVAO, terrainVertexCount, texture, kIdentity44f};
+		PadData pad = { padVAO, padVertexCount, padMaterials };
+		DefaultData vehicle = {vehicleVAO, vehicleVertexCount, 0, vehicleModel};
+		
+		drawScene(baseContext, terrain, pad, vehicle, progDefault.programId(), progPads.programId());
 
 		glEnable(GL_CULL_FACE);
 
