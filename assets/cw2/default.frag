@@ -53,7 +53,7 @@ void main()
 	}
 
 	// 3 Local Point Lights
-	float shininess = 40.0;
+	float shininess = 20.0;
 
 	for (int i = 0; i < 3; ++i)
 	{

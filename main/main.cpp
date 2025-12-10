@@ -1113,9 +1113,9 @@ int main() try
 
 	// Initialize light sources
 	globalLight  = { Vec3f{0.1f, 1.f, -1.f}, Vec3f{ 0.9f, 0.9f, 0.6f }, true };
-	pointLights[0] = { Vec3f{0.f, 30.f, 35.f}, Vec3f{0.f, 1.f, 1.f}, true };
-	pointLights[1] = { Vec3f{10.f, 30.f, 55.f}, Vec3f{1.f, 1.f, 0.2f}, true };
-	pointLights[2] = { Vec3f{20.f, 30.f, 35.f}, Vec3f{1.f, 0.f, 1.f}, true };
+	pointLights[0] = { Vec3f{10.f, 5.f, 50.f}, Vec3f{0.f, 1.f, 1.f}, true };
+	pointLights[1] = { Vec3f{15.f, 5.f, 42.f}, Vec3f{1.f, 1.f, 0.2f}, true };
+	pointLights[2] = { Vec3f{5.f, 5.f, 42.f}, Vec3f{1.f, 0.f, 1.f}, true };
 
 	// Animation state
 	Vec3f vehiclePosition{ 10.f, -0.5f, 45.f };

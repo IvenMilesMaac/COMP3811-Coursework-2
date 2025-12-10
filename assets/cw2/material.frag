@@ -41,7 +41,7 @@ void main()
 	{
 		vec3 lightDir = normalize(uGlobalLight.direction);
 		float nDotL = max(0.0, dot(normal, lightDir));
-		vec3 diffuse = nDotL * uGlobalLight.color;
+		vec3 diffuse = nDotL * uGlobalLight.color * materialColor;
 
 		lighting += diffuse; 
 	}
