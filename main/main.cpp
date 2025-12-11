@@ -10,6 +10,7 @@
 
 // Imports
 #include <algorithm>
+#include <ctime> 
 #include <vector> 
 #include <rapidobj/rapidobj.hpp> 
 #include "../vmlib/vec2.hpp"
@@ -44,6 +45,26 @@ namespace
 		Free = 0,
 		Chase = 1,
 		Ground = 2
+	};
+
+	struct Particle
+	{
+		Vec3f position;
+		Vec3f velocity;
+		float life;
+		float maxLife;
+	};
+
+	struct ParticleSystem
+	{
+		std::vector<Particle> particles;
+		GLuint vao = 0;
+		GLuint texture = 0;
+		float emissionTimer = 0.0f;
+
+		ParticleSystem() { 
+			particles.reserve(1024); 
+		}
 	};
 
 	struct State_
@@ -85,6 +106,7 @@ namespace
 		}animation;
 
 		CameraMode cameraMode;
+		ParticleSystem particles;
 		CameraMode cameraModeR;
 		bool splitScreen = false;
 	};
@@ -817,7 +839,6 @@ namespace
 
 		return vehicle;
 	}
-}
 
 	struct AnimationState
 	{
@@ -831,7 +852,7 @@ namespace
 		AnimationState result{};
 
 		// Normalize time
-		float flightDuration = 12.0f; 
+		float flightDuration = 12.0f;
 		float u = t / flightDuration;
 
 		if (u < 0.0f) u = 0.0f;
@@ -880,9 +901,236 @@ namespace
 			result.direction = Vec3f{ 0.0f, 1.0f, 0.0f };
 		}
 
-		result.speed = 30.0f * (s * (1.0f - s)) * 4.0f; 
+		result.speed = 30.0f * (s * (1.0f - s)) * 4.0f;
 
 		return result;
+	}
+
+	GLuint create_procedural_texture()
+	{
+		constexpr int size = 64;
+		std::vector<unsigned char> data(size * size * 4);
+
+		for (int y = 0; y < size; ++y)
+		{
+			for (int x = 0; x < size; ++x)
+			{
+				float dx = (float)x / size - 0.5f;
+				float dy = (float)y / size - 0.5f;
+				float dist = std::sqrt(dx * dx + dy * dy);
+				float intensity = 1.0f - (dist * 2.0f);
+				if (intensity < 0.0f) intensity = 0.0f;
+				intensity = intensity * intensity;
+				unsigned char val = static_cast<unsigned char>(intensity * 255.0f);
+				int idx = (y * size + x) * 4;
+				data[idx + 0] = val;
+				data[idx + 1] = val;
+				data[idx + 2] = val;
+				data[idx + 3] = val;
+			}
+		}
+
+		GLuint tex = 0;
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+		return tex;
+	}
+
+	GLuint create_particle_quad_vao()
+	{
+		float vertices[] = {
+			-0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,   0.0f, 0.0f,
+			 0.5f, -0.5f, 0.0f,   0.f, 1.f, 0.f,   1.0f, 0.0f,
+			 0.5f,  0.5f, 0.0f,   0.f, 1.f, 0.f,   1.0f, 1.0f,
+			-0.5f,  0.5f, 0.0f,   0.f, 1.f, 0.f,   0.0f, 1.0f
+		};
+		unsigned int indices[] = { 0, 1, 2, 2, 3, 0 };
+
+		GLuint vao = 0, vbo = 0, ebo = 0;
+		glGenVertexArrays(1, &vao);
+		glGenBuffers(1, &vbo);
+		glGenBuffers(1, &ebo);
+
+		glBindVertexArray(vao);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+		// Loc 0: position
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+		glEnableVertexAttribArray(0);
+		// Loc 1: normal
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+		glEnableVertexAttribArray(1);
+		// Loc 2: uv
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		return vao;
+	}
+
+	void update_particles(State_& state, float dt, Vec3f const& vehiclePos,
+		Mat44f const& vehicleTransform, bool emit)
+	{
+		auto& ps = state.particles;
+
+		if (emit)
+		{
+			Vec3f exhaustOffset{ 0.f, -2.0f, 0.f };
+			Vec4f exhaustPos4 = vehicleTransform * Vec4f{ exhaustOffset.x, exhaustOffset.y, exhaustOffset.z, 1.0f };
+			Vec3f exhaustPos{ exhaustPos4.x, exhaustPos4.y, exhaustPos4.z };
+
+			const float emissionRate = 100.0f; // particles per second
+			int particlesToEmit = static_cast<int>(dt * emissionRate);
+
+			for (int i = 0; i < particlesToEmit; ++i)
+			{
+				// Cap particle count
+				if (ps.particles.size() >= 1024) break;
+
+				Particle p;
+				p.position = exhaustPos;
+
+				// Random spread and speed variation of particles
+				float spreadX = ((rand() % 200) - 100) / 100.0f;
+				float spreadZ = ((rand() % 200) - 100) / 100.0f;
+				float speedVariation = ((rand() % 100) / 100.0f); 
+
+				p.velocity = Vec3f{
+					spreadX * 1.5f,
+					-3.0f - speedVariation * 2.0f,
+					spreadZ * 1.5f
+				};
+
+				// Randomise TTL
+				p.life = p.maxLife = 1.0f + ((rand() % 100) / 100.0f) * 0.5f; 
+				ps.particles.push_back(p);
+			}
+		}
+		else if (!state.animation.isActive)
+		{
+			ps.particles.clear();
+			ps.emissionTimer = 0.0f;
+		}
+
+		// Particle physics 
+		Vec3f gravity{ 0.0f, -1.0f, 0.0f }; 
+
+		for (size_t i = 0; i < ps.particles.size(); )
+		{
+			auto& p = ps.particles[i];
+
+			p.velocity += gravity * dt;
+			p.position += p.velocity * dt;
+			p.life -= dt;
+
+			if (p.life <= 0.0f)
+			{
+				ps.particles[i] = ps.particles.back();
+				ps.particles.pop_back();
+			}
+			else ++i;
+		}
+	}
+
+	void draw_particles(State_& state, Mat44f const& view, Mat44f const& proj,
+		Vec3f const& camRight, Vec3f const& camUp)
+	{
+		auto& ps = state.particles;
+		if (ps.particles.empty()) return;
+
+		glUseProgram(state.progTex->programId());
+
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE); 
+		glDepthMask(GL_FALSE); 
+		glEnable(GL_DEPTH_TEST); 
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, ps.texture);
+		glUniform1i(glGetUniformLocation(state.progTex->programId(), "uTexture"), 0);
+		glUniform1i(5, true); 
+
+		GLint origGlobalEnabled;
+		glGetUniformiv(state.progTex->programId(),
+			glGetUniformLocation(state.progTex->programId(), "uGlobalLight.enabled"),
+			&origGlobalEnabled);
+
+		// Disable lighting for particles
+		glUniform3f(glGetUniformLocation(state.progTex->programId(), "uGlobalLight.color"), 0.f, 0.f, 0.f);
+		glUniform1i(glGetUniformLocation(state.progTex->programId(), "uGlobalLight.enabled"), 0);
+
+		for (int i = 0; i < 3; ++i)
+		{
+			std::string base = "uPointLights[" + std::to_string(i) + "].";
+			glUniform1i(glGetUniformLocation(state.progTex->programId(), (base + "enabled").c_str()), 0);
+		}
+
+		glBindVertexArray(ps.vao);
+
+		Vec3f camForward = normalize(cross(camUp, camRight));
+
+		// Draw all particles
+		for (const auto& p : ps.particles)
+		{
+			// Particle size variation
+			float lifeRatio = p.life / p.maxLife;
+			float scale = 0.5f * (0.3f + 0.7f * lifeRatio); // Scale from 0.3 to 1.0
+
+			Mat44f model = kIdentity44f;
+
+			model.v[0] = camRight.x * scale;
+			model.v[4] = camRight.y * scale;
+			model.v[8] = camRight.z * scale;
+			model.v[12] = 0.0f;
+
+			model.v[1] = camUp.x * scale;
+			model.v[5] = camUp.y * scale;
+			model.v[9] = camUp.z * scale;
+			model.v[13] = 0.0f;
+
+			model.v[2] = camForward.x * scale;
+			model.v[6] = camForward.y * scale;
+			model.v[10] = camForward.z * scale;
+			model.v[14] = 0.0f;
+
+			model.v[3] = p.position.x;
+			model.v[7] = p.position.y;
+			model.v[11] = p.position.z;
+			model.v[15] = 1.0f;
+
+			Mat44f mvp = proj * view * model;
+			glUniformMatrix4fv(0, 1, GL_TRUE, mvp.v);
+			glUniformMatrix4fv(2, 1, GL_TRUE, model.v);
+
+			Mat33f normalMatrix = kIdentity33f;
+			glUniformMatrix3fv(1, 1, GL_TRUE, normalMatrix.v);
+
+			// Color Shift
+			float intensity = lifeRatio * lifeRatio; 
+			glUniform3f(4, 1.0f * intensity, 0.5f * intensity, 0.1f * intensity);
+
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		}
+
+		glBindVertexArray(0);
+
+		glDepthMask(GL_TRUE);
+		glDisable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
 	struct CamFinal {
@@ -988,6 +1236,7 @@ namespace
 
 		return base;
 	}
+}
 
 int main() try
 {
@@ -1106,6 +1355,11 @@ int main() try
 		{GL_FRAGMENT_SHADER, "assets/cw2/material.frag"}
 	});
 	state.progMat = &progPads;
+
+	// Particles Initialization
+	std::srand(static_cast<unsigned>(std::time(nullptr)));
+	state.particles.vao = create_particle_quad_vao();
+	state.particles.texture = create_procedural_texture();
 
 	// Initialize camera
 	state.camControl.phi = 0.0f;
@@ -1299,7 +1553,10 @@ int main() try
 		PadData pad = { padVAO, padVertexCount, padMaterials };
 		DefaultData vehicle = { vehicleVAO, vehicleVertexCount, 0, vehicleModel };
 
-		//  ------ Render main or left screen
+		// Update particles
+		update_particles(state, dt, currentVehiclePos, vehicleModel, anim.isActive&& anim.isPlaying);
+
+		// Render main or left screen
 		CamFinal result = processCameraMode(state.cameraMode, cam.position, basis.forward, basis.up, basis.right, state.animation, currentVehiclePos);
 		Mat44f camera_view = construct_camera_view(result.camForwardFinal, result.camUpFinal, result.camRightFinal, result.camPosFinal);
 
@@ -1323,8 +1580,9 @@ int main() try
 		glViewport(0, 0, width, fbheight);
 		RenderContext baseContext = { projection, camera_view, cam.position };
 		drawScene(baseContext, terrain, pad, vehicle, progDefault.programId(), progPads.programId());
+		draw_particles(state, camera_view, projection, result.camRightFinal, result.camUpFinal);
 
-		// ------ Render right screen if necessary
+		// Render right screen if necessary
 		if (state.splitScreen)
 		{
 			CamFinal resultR = processCameraMode(state.cameraModeR, camR.position, basisR.forward, basisR.up, basisR.right, state.animation, currentVehiclePos);
@@ -1342,6 +1600,7 @@ int main() try
 			glViewport(halfWidth, 0, halfWidth, fbheight);
 			RenderContext baseContextR = { projectionR, right_view, camR.position };
 			drawScene(baseContextR, terrain, pad, vehicle, progDefault.programId(), progPads.programId());
+			draw_particles(state, right_view, projectionR, resultR.camRightFinal, resultR.camUpFinal);
 		}
 
 		glEnable(GL_CULL_FACE);
