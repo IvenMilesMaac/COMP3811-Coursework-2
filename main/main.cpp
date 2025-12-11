@@ -1556,9 +1556,6 @@ int main() try
 		// Update particles
 		update_particles(state, dt, currentVehiclePos, vehicleModel, anim.isActive&& anim.isPlaying);
 
-		// Camera setup
-		Mat44f camera_view;
-
 		// Render main or left screen
 		CamFinal result = processCameraMode(state.cameraMode, cam.position, basis.forward, basis.up, basis.right, state.animation, currentVehiclePos);
 		Mat44f camera_view = construct_camera_view(result.camForwardFinal, result.camUpFinal, result.camRightFinal, result.camPosFinal);
