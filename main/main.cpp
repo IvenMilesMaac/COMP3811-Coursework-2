@@ -1238,7 +1238,7 @@ namespace
 			}
 		}
 
-		return;
+		return result;
 	}
 
 	struct CamBasis {
