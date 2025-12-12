@@ -12,9 +12,11 @@
 #include <algorithm>
 #include <ctime> 
 #include <vector> 
+#include <cstdio>
 #include <rapidobj/rapidobj.hpp> 
 #include "../vmlib/vec2.hpp"
 #include "../vmlib/vec3.hpp"
+#include "../third_party/fontstash/include/fontstash.h"
 
 #include "../support/error.hpp"
 #include "../support/program.hpp"
@@ -105,6 +107,27 @@ namespace
 			Vec3f startPosition;
 		}animation;
 
+		struct UI_
+		{
+			FONScontext* fs = nullptr;
+			int font = FONS_INVALID;
+
+			GLuint fontTexture = 0;
+			int atlasW = 0;
+			int atlasH = 0;
+
+			GLuint program = 0;
+			GLuint vao = 0;
+			GLuint vbo = 0;
+			GLint uScreen = -1;
+			GLint uTex = -1;
+
+			float mouseX = 0.f;
+			float mouseY = 0.f;
+			int winW = 0;
+			int winH = 0;
+		}ui;
+
 		CameraMode cameraMode;
 		ParticleSystem particles;
 		CameraMode cameraModeR;
@@ -116,6 +139,13 @@ namespace
 	void glfw_callback_mouse_button_(GLFWwindow*, int, int, int);
 	void glfw_callback_key_(GLFWwindow*, int, int, int, int);
 	void glfw_callback_motion_(GLFWwindow*, double, double);
+
+	void ui_init(State_& state, int fbW, int fbH);
+	void ui_cleanup(State_& state);
+	void ui_resize(State_& state, int fbW, int fbH);
+	void ui_draw(State_& state, int fbW, int fbH, float altitude);
+	void ui_mouse_move(State_& state, float x, float y);
+	void ui_mouse_button(State_& state, int button, int action);
 
 	struct GLFWCleanupHelper
 	{
@@ -1236,6 +1266,374 @@ namespace
 
 		return base;
 	}
+
+	struct UIVertex
+	{
+		float x, y;
+		float u, v;
+		unsigned char r, g, b, a;
+	};
+
+	std::vector<UIVertex> g_uiVerts;
+
+	// Shader compilation and program linking helpers
+	GLuint compile_shader_(GLenum type, const char* src)
+	{
+		GLuint sh = glCreateShader(type);
+		glShaderSource(sh, 1, &src, nullptr);
+		glCompileShader(sh);
+
+		GLint ok = GL_FALSE;
+		glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+		if (!ok)
+		{
+			char log[4096];
+			GLsizei len = 0;
+			glGetShaderInfoLog(sh, 4096, &len, log);
+			throw Error("UI shader compile failed: {}", log);
+		}
+		return sh;
+	}
+
+	GLuint link_program_(GLuint vs, GLuint fs)
+	{
+		GLuint prog = glCreateProgram();
+		glAttachShader(prog, vs);
+		glAttachShader(prog, fs);
+		glLinkProgram(prog);
+
+		GLint ok = GL_FALSE;
+		glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+		if (!ok)
+		{
+			char log[4096];
+			GLsizei len = 0;
+			glGetProgramInfoLog(prog, 4096, &len, log);
+			throw Error("UI program link failed: {}", log);
+		}
+		return prog;
+	}
+
+	// Fontstash rendering callbacks
+	// create font texture
+	int fs_create(void* userPtr, int w, int h)
+	{
+		auto* state = static_cast<State_*>(userPtr);
+		state->ui.atlasW = w;
+		state->ui.atlasH = h;
+
+		glGenTextures(1, &state->ui.fontTexture);
+		glBindTexture(GL_TEXTURE_2D, state->ui.fontTexture);
+
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		glBindTexture(GL_TEXTURE_2D, 0);
+		return 1;
+	}
+
+	// resize font texture
+	int fs_resize(void* userPtr, int w, int h)
+	{
+		auto* state = static_cast<State_*>(userPtr);
+		state->ui.atlasW = w;
+		state->ui.atlasH = h;
+
+		glBindTexture(GL_TEXTURE_2D, state->ui.fontTexture);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		return 1;
+	}
+
+	// update font texture region
+	void fs_update(void* userPtr, int* rect, const unsigned char* data)
+	{
+		auto* state = static_cast<State_*>(userPtr);
+
+		int x = rect[0];
+		int y = rect[1];
+		int w = rect[2] - rect[0];
+		int h = rect[3] - rect[1];
+
+		glBindTexture(GL_TEXTURE_2D, state->ui.fontTexture);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+		for (int row = 0; row < h; ++row)
+		{
+			const unsigned char* src = data + (y + row) * state->ui.atlasW + x;
+			glTexSubImage2D(GL_TEXTURE_2D, 0, x, y + row, w, 1, GL_RED, GL_UNSIGNED_BYTE, src);
+		}
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	// collect vertices for drawing
+	void fs_draw(void*, const float* verts, const float* tcoords, const unsigned int* colors, int nverts)
+	{
+		for (int i = 0; i < nverts; ++i)
+		{
+			UIVertex v;
+			v.x = verts[i * 2 + 0];
+			v.y = verts[i * 2 + 1];
+			v.u = tcoords[i * 2 + 0];
+			v.v = tcoords[i * 2 + 1];
+
+			unsigned int c = colors[i];
+			v.a = (c >> 24) & 0xFF;
+			v.b = (c >> 16) & 0xFF;
+			v.g = (c >> 8) & 0xFF;
+			v.r = (c >> 0) & 0xFF;
+
+			g_uiVerts.push_back(v);
+		}
+	}
+
+	// delete font texture
+	void fs_delete(void* userPtr)
+	{
+		auto* state = static_cast<State_*>(userPtr);
+		if (state->ui.fontTexture)
+		{
+			glDeleteTextures(1, &state->ui.fontTexture);
+			state->ui.fontTexture = 0;
+		}
+	}
+
+	// UI initialization function
+	void ui_init(State_& state, int fbW, int fbH)
+	{
+		state.ui.winW = fbW;
+		state.ui.winH = fbH;
+
+		FONSparams params{};
+		params.width = 512;
+		params.height = 512;
+		params.flags = FONS_ZERO_TOPLEFT;
+		params.userPtr = &state;
+		params.renderCreate = fs_create;
+		params.renderResize = fs_resize;
+		params.renderUpdate = fs_update;
+		params.renderDraw = fs_draw;
+		params.renderDelete = fs_delete;
+
+		state.ui.fs = fonsCreateInternal(&params);
+		if (!state.ui.fs)
+			throw Error("Failed to create Fontstash context");
+
+		state.ui.font = fonsAddFont(state.ui.fs, "sans", "assets/cw2/DroidSansMonoDotted.ttf");
+		if (state.ui.font == FONS_INVALID)
+			throw Error("Failed to load UI font: assets/cw2/DroidSansMonoDotted.ttf");
+
+		// UI shader
+		const char* vsSrc = R"(
+		#version 430
+		layout(location=0) in vec2 aPos;
+		layout(location=1) in vec2 aUV;
+		layout(location=2) in vec4 aColor;
+
+		uniform vec2 uScreen;
+		out vec2 vUV;
+		out vec4 vColor;
+
+		void main() {
+			// Convert screen coords (0..W, 0..H) to NDC (-1..1, 1..-1)
+			vec2 ndc = vec2(aPos.x / uScreen.x * 2.0 - 1.0, 
+						    1.0 - aPos.y / uScreen.y * 2.0);
+			gl_Position = vec4(ndc, 0.0, 1.0);
+			vUV = aUV;
+			vColor = aColor;
+		}
+	)";
+
+		// Fragment shader
+		const char* fsSrc = R"(
+		#version 430
+		in vec2 vUV;
+		in vec4 vColor;
+		uniform sampler2D uTex;
+		out vec4 FragColor;
+
+		void main() {
+			float cov = texture(uTex, vUV).r;
+			FragColor = vec4(vColor.rgb, vColor.a * cov);
+		}
+	)";
+
+		// Compile and link UI shader program
+		GLuint vsh = compile_shader_(GL_VERTEX_SHADER, vsSrc);
+		GLuint fsh = compile_shader_(GL_FRAGMENT_SHADER, fsSrc);
+		state.ui.program = link_program_(vsh, fsh);
+		glDeleteShader(vsh);
+		glDeleteShader(fsh);
+
+		state.ui.uScreen = glGetUniformLocation(state.ui.program, "uScreen");
+		state.ui.uTex = glGetUniformLocation(state.ui.program, "uTex");
+
+		glGenVertexArrays(1, &state.ui.vao);
+		glGenBuffers(1, &state.ui.vbo);
+
+		glBindVertexArray(state.ui.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, state.ui.vbo);
+
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)0);
+
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)(2 * sizeof(float)));
+
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(UIVertex), (void*)(4 * sizeof(float)));
+
+		glBindVertexArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+	}
+
+	// UI Cleanup
+	void ui_cleanup(State_& state)
+	{
+		if (state.ui.fs)
+		{
+			fonsDeleteInternal(state.ui.fs);
+			state.ui.fs = nullptr;
+		}
+
+		if (state.ui.vbo) glDeleteBuffers(1, &state.ui.vbo);
+		if (state.ui.vao) glDeleteVertexArrays(1, &state.ui.vao);
+		if (state.ui.program) glDeleteProgram(state.ui.program);
+
+		state.ui.vbo = 0;
+		state.ui.vao = 0;
+		state.ui.program = 0;
+	}
+
+	// UI Event Handlers
+	// Window resize
+	void ui_resize(State_& state, int fbW, int fbH)
+	{
+		state.ui.winW = fbW;
+		state.ui.winH = fbH;
+	}
+
+	// Mouse movement
+	void ui_mouse_move(State_& state, float x, float y)
+	{
+		state.ui.mouseX = x;
+		state.ui.mouseY = y;
+	}
+
+	// Rectangle Hitbox
+	bool point_in_rect(float px, float py, float x, float y, float w, float h)
+	{
+		return px >= x && px <= x + w && py >= y && py <= y + h;
+	}
+
+	// Mouse button
+	void ui_mouse_button(State_& state, int button, int action)
+	{
+		if (button != GLFW_MOUSE_BUTTON_LEFT || action != GLFW_PRESS)
+			return;
+
+		float bw = 100.f;
+		float bh = 30.f;
+		float y = float(state.ui.winH) - 60.f;
+
+		float launchX = float(state.ui.winW) * 0.5f - 120.f;
+		float resetX = float(state.ui.winW) * 0.5f + 20.f;
+
+		// Launch Button
+		if (point_in_rect(state.ui.mouseX, state.ui.mouseY, launchX, y, bw, bh))
+		{
+			if (!state.animation.isActive)
+			{
+				state.animation.isActive = true;
+				state.animation.isPlaying = true;
+				state.animation.time = 0.f;
+			}
+			else
+			{
+				state.animation.isPlaying = !state.animation.isPlaying;
+			}
+		}
+
+		// Reset Button
+		if (point_in_rect(state.ui.mouseX, state.ui.mouseY, resetX, y, bw, bh))
+		{
+			state.animation.isActive = false;
+			state.animation.isPlaying = false;
+			state.animation.time = 0.f;
+		}
+	}
+
+	// Flush Vertex Buffer and draw UI
+	void ui_flush_text(State_& state)
+	{
+		if (g_uiVerts.empty())
+			return;
+
+		glUseProgram(state.ui.program);
+
+		glUniform2f(state.ui.uScreen, float(state.ui.winW), float(state.ui.winH));
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, state.ui.fontTexture);
+		glUniform1i(state.ui.uTex, 0);
+
+		glBindVertexArray(state.ui.vao);
+		glBindBuffer(GL_ARRAY_BUFFER, state.ui.vbo);
+		glBufferData(GL_ARRAY_BUFFER, g_uiVerts.size() * sizeof(UIVertex), g_uiVerts.data(), GL_STREAM_DRAW);
+
+		glDrawArrays(GL_TRIANGLES, 0, GLsizei(g_uiVerts.size()));
+
+		glBindVertexArray(0);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glUseProgram(0);
+	}
+
+	// Main UI drawing function
+	void ui_draw(State_& state, int fbW, int fbH, float altitude)
+	{
+		state.ui.winW = fbW;
+		state.ui.winH = fbH;
+
+		GLboolean depthWas = glIsEnabled(GL_DEPTH_TEST);
+		GLboolean blendWas = glIsEnabled(GL_BLEND);
+
+		glDisable(GL_DEPTH_TEST);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		g_uiVerts.clear();
+
+		fonsClearState(state.ui.fs);
+		fonsSetFont(state.ui.fs, state.ui.font);
+		fonsSetColor(state.ui.fs, 0xFFFFFFFF);
+
+		char buf[64];
+		std::snprintf(buf, sizeof(buf), "ALTITUDE: %.1f", altitude);
+		fonsSetSize(state.ui.fs, 20.f);
+		fonsSetAlign(state.ui.fs, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
+		fonsDrawText(state.ui.fs, 20.f, 20.f, buf, nullptr);
+
+		fonsSetSize(state.ui.fs, 18.f);
+		fonsSetAlign(state.ui.fs, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
+
+		float y = float(fbH) - 60.f;
+		float launchX = float(fbW) * 0.5f - 120.f;
+		float resetX = float(fbW) * 0.5f + 20.f;
+
+		fonsDrawText(state.ui.fs, launchX, y, "LAUNCH", nullptr);
+		fonsDrawText(state.ui.fs, resetX, y, "RESET", nullptr);
+
+		ui_flush_text(state);
+
+		if (!blendWas) glDisable(GL_BLEND);
+		if (depthWas) glEnable(GL_DEPTH_TEST);
+	}
 }
 
 int main() try
@@ -1356,6 +1754,10 @@ int main() try
 	});
 	state.progMat = &progPads;
 
+	// UI Initialization
+	glfwGetFramebufferSize(window, &iwidth, &iheight);
+	ui_init(state, iwidth, iheight);
+	
 	// Particles Initialization
 	std::srand(static_cast<unsigned>(std::time(nullptr)));
 	state.particles.vao = create_particle_quad_vao();
@@ -1437,6 +1839,7 @@ int main() try
 			}
 
 			glViewport( 0, 0, nwidth, nheight );
+			ui_resize(state, nwidth, nheight);
 		}
 
 		// Update state
@@ -1603,6 +2006,10 @@ int main() try
 			draw_particles(state, right_view, projectionR, resultR.camRightFinal, resultR.camUpFinal);
 		}
 
+		// Draw UI overlay
+		glViewport(0, 0, int(fbwidth), int(fbheight));
+		ui_draw(state, int(fbwidth), int(fbheight), currentVehiclePos.y);
+
 		glEnable(GL_CULL_FACE);
 
 		glUseProgram(0);
@@ -1614,7 +2021,7 @@ int main() try
 	}
 
 	// Cleanup.
-	//TODO: additional cleanup
+	ui_cleanup(state);
 	
 	return 0;
 }
@@ -1657,6 +2064,12 @@ namespace
 
 	void glfw_callback_mouse_button_(GLFWwindow* aWindow, int aButton, int aAction, int mod)
 	{
+		// Handle UI button clicks first
+		if (auto* state = static_cast<State_*>(glfwGetWindowUserPointer(aWindow)))
+		{
+			ui_mouse_button(*state, aButton, aAction);
+		}
+
 		// activate / deactivate camera control
 		if (GLFW_MOUSE_BUTTON_RIGHT == aButton && GLFW_PRESS == aAction)
 		{
@@ -1792,6 +2205,8 @@ namespace
 	{
 		if (auto* state = static_cast<State_*>(glfwGetWindowUserPointer(aWindow)))
 		{
+			ui_mouse_move(*state, float(aX), float(aY));
+
 			if (state->camInputs.cameraActive)
 				updateCamRotation(aX, aY, state->camControl);
 			state->camControl.lastX = float(aX);
