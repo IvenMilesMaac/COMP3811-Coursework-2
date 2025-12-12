@@ -32,6 +32,29 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "../third_party/stb/include/stb_image.h"
 
+//#define ENABLE_GPU_TIMERS
+#ifdef ENABLE_GPU_TIMERS
+#include <chrono>
+
+static constexpr int TIMESTAMP_POINTS = 5;
+
+struct GPUTimers {
+	std::vector<GLuint> queries;
+	int ringSize = 8; // delay before reading
+	int points = TIMESTAMP_POINTS; // number of points to record timestamp
+
+	struct Result {
+		uint64_t timestamps[TIMESTAMP_POINTS];
+		double diff_ms[TIMESTAMP_POINTS - 1];
+		int frameIndex;
+	};
+	std::vector<Result> results;
+
+} gpuTimers;
+
+static int frameCounter = 0;
+static int slot = 0;
+#endif
 
 constexpr float kPi = std::numbers::pi_v<float>;
 
@@ -502,7 +525,17 @@ namespace
 	{
 		Mat44f padModel;
 
+		#ifdef ENABLE_GPU_TIMERS
+			slot = frameCounter % gpuTimers.ringSize;
+			glQueryCounter(gpuTimers.queries[slot * gpuTimers.points + 0], GL_TIMESTAMP);
+		#endif
+
 		drawTerrain(ctx, defaultProgId, terrain.texture, terrain.vao, terrain.vertexCount);
+
+		#ifdef ENABLE_GPU_TIMERS
+		// task 1.2
+			glQueryCounter(gpuTimers.queries[slot * gpuTimers.points + 1], GL_TIMESTAMP);
+		#endif
 
 		padModel = make_translation(Vec3f{ 10.f, -0.97f, 45.f });
 		drawLandingPad(ctx, padProgId, padModel, pad.materials, pad.vao, pad.vertexCount);
@@ -510,7 +543,16 @@ namespace
 		padModel = make_translation(Vec3f{ 20.f, -0.97f, -50.f });
 		drawLandingPad(ctx, padProgId, padModel, pad.materials, pad.vao, pad.vertexCount);
 
+		#ifdef ENABLE_GPU_TIMERS
+		// task 1.4
+			glQueryCounter(gpuTimers.queries[slot * gpuTimers.points + 2], GL_TIMESTAMP);
+		#endif
+
 		drawSpaceVehicle(ctx, defaultProgId, vehicle.model, vehicle.vao, vehicle.vertexCount);
+		#ifdef ENABLE_GPU_TIMERS
+		// task 1.5
+			glQueryCounter(gpuTimers.queries[slot * gpuTimers.points + 3], GL_TIMESTAMP);
+		#endif
 	}
 
 	SimpleMeshData create_cylinder(float radius = 0.5f, float height = 1.0f, int segments = 32)
@@ -1708,6 +1750,12 @@ int main() try
 	if( !gladLoadGLLoader( (GLADloadproc)&glfwGetProcAddress ) )
 		throw Error( "gladLoadGLLoader() failed - cannot load GL API!" );
 
+	#ifdef ENABLE_GPU_TIMERS
+	// initialise GPU timers
+	gpuTimers.queries.resize(gpuTimers.ringSize * gpuTimers.points);
+	glGenQueries((GLsizei)gpuTimers.queries.size(), gpuTimers.queries.data());
+	#endif
+
 	std::print( "RENDERER {}\n", (char const*)glGetString( GL_RENDERER ) );
 	std::print( "VENDOR {}\n", (char const*)glGetString( GL_VENDOR ) );
 	std::print( "VERSION {}\n", (char const*)glGetString( GL_VERSION ) );
@@ -2014,13 +2062,76 @@ int main() try
 
 		glUseProgram(0);
 
+		#ifdef ENABLE_GPU_TIMERS
+		// finished rendering
+			glQueryCounter(gpuTimers.queries[slot * gpuTimers.points + 4], GL_TIMESTAMP);
+		#endif
+
 		OGL_CHECKPOINT_DEBUG();
 
 		// Display results
 		glfwSwapBuffers( window );
+
+		#ifdef ENABLE_GPU_TIMERS
+		// read results
+		int read = (frameCounter + 1) % gpuTimers.ringSize;
+		GLuint firstQuery = gpuTimers.queries[read * gpuTimers.points + 0];
+		GLint available = 0;
+		glGetQueryObjectiv(firstQuery, GL_QUERY_RESULT_AVAILABLE, &available);
+		if (available)
+		{
+			GPUTimers::Result r;
+			r.frameIndex = frameCounter - gpuTimers.ringSize + 1;
+			for (int p = 0; p < gpuTimers.points; ++p)
+			{
+				GLuint q = gpuTimers.queries[read * gpuTimers.points + p];
+				GLuint64 value = 0;
+				glGetQueryObjectui64v(q, GL_QUERY_RESULT, &value);
+				r.timestamps[p] = value;
+			}
+			for (int p = 1; p < gpuTimers.points; ++p)
+			{
+				r.diff_ms[p - 1] = double(r.timestamps[p] - r.timestamps[p-1]) * 1e-6;
+			}
+			gpuTimers.results.push_back(r);
+		}
+			
+			frameCounter++;
+		#endif
 	}
 
+	#ifdef ENABLE_GPU_TIMERS
+		if (!gpuTimers.queries.empty())
+		{
+			glDeleteQueries((GLsizei)gpuTimers.queries.size(), gpuTimers.queries.data());
+			gpuTimers.queries.clear();
+		}
+
+		std::ofstream csv("gpu_stats.csv");
+		csv << "frame,terrain,pads,vehicle,full\n";
+		for (auto& r : gpuTimers.results)
+		{	
+			r.diff_ms[3] = double(r.timestamps[4] - r.timestamps[0]) * 1e-6;
+			csv << r.frameIndex << ","
+				<< r.diff_ms[0] << ","
+				<< r.diff_ms[1] << ","
+				<< r.diff_ms[2] << ","
+				<< r.diff_ms[3] << "\n";
+		}
+		csv.close();
+
+	#endif
+
 	// Cleanup.
+	glDeleteVertexArrays(1, &terrainVAO);
+	glDeleteVertexArrays(1, &padVAO);
+	glDeleteVertexArrays(1, &vehicleVAO);
+
+	glDeleteTextures(1, &texture);
+	glDeleteTextures(1, &state.particles.texture);
+
+	glDeleteProgram(progDefault.programId());
+	glDeleteProgram(progPads.programId());
 	ui_cleanup(state);
 	
 	return 0;
