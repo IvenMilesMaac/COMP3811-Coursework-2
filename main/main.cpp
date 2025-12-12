@@ -1688,7 +1688,7 @@ int main() try
 			}
 			gpuTimers.results.push_back(r);
 		}
-
+			
 			frameCounter++;
 		#endif
 	}
@@ -1716,7 +1716,15 @@ int main() try
 	#endif
 
 	// Cleanup.
-	//TODO: additional cleanup
+	glDeleteVertexArrays(1, &terrainVAO);
+	glDeleteVertexArrays(1, &padVAO);
+	glDeleteVertexArrays(1, &vehicleVAO);
+
+	glDeleteTextures(1, &texture);
+	glDeleteTextures(1, &state.particles.texture);
+
+	glDeleteProgram(progDefault.programId());
+	glDeleteProgram(progPads.programId());
 	
 	return 0;
 }
